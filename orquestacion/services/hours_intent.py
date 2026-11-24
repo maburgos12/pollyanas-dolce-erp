@@ -22,7 +22,7 @@ def validate_output(data, result):
     action, branch, detail = (result[key] for key in ("action", "branch", "detail"))
     if action == "clarify" and branch is None and detail is None:
         return
-    if action not in ("keep_closed", "change_close", "change_open"):
+    if action not in ("keep_closed", "replace_with_draft", "change_close", "change_open"):
         raise ValueError("invalid_output")
     if any(not isinstance(span, str) or not span.strip() or len(span) > 80 or span not in data["text"]
            for span in (branch, detail)):

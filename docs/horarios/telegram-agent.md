@@ -175,3 +175,14 @@ Después del CI y del despliegue del ERP, publicar en Mac-IA-02 el archivo versi
 hash, permisos 0600, sintaxis, probe y una inferencia sintética antes de activar
 `python manage.py configure_hours_reasoning enable`. Para pausar sólo la función
 de correcciones, ejecutar `python manage.py configure_hours_reasoning disable`.
+
+Para reemplazar horas puntuales ya aprobadas, la corrección debe identificar la
+sucursal y los días que se reemplazan con el horario del borrador, así como el
+día de cierre que se conserva. Por ejemplo, «Los 23 y 24 de El Túnel se
+reemplazan con el horario de la propuesta y el miércoles se mantiene cerrado».
+Las fechas sustituidas tienen la misma prioridad que un horario especial de un
+solo día. El botón de aprobación se vuelve a emitir para la propuesta completa.
+El cambio se limita al periodo y a la sucursal indicada.
+
+Si la IA termina dentro del plazo de la corrección, el bot puede recoger el
+resultado en la siguiente consulta mientras el borrador original siga vigente.

@@ -22,7 +22,7 @@ from django.utils import timezone
 
 from horarios_especiales.models import SolicitudHorarioEspecial, TelegramHoursCursor, TelegramHoursUpdate
 from horarios_especiales.services.requests import approve_request, cancel_request, create_request_from_rules
-from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, rule_applies
+from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, projection_rank, rule_applies, rule_priority
 from horarios_especiales.services.telegram_parser import EXAMPLES, WEEKDAYS, parse_grouped_instruction, parse_instruction
 
 
@@ -295,7 +295,7 @@ def higher_priority_conflicts(branch_ids, rule):
                 conflicts.append(obj.request_code)
             continue
         shared = set(branch_ids).intersection(row['branch_id'] for row in payload['locations'])
-        if any(PRECEDENCE[old['kind']] > PRECEDENCE[rule['kind']] and rules_overlap(old, rule)
+        if any(any(rule_priority(old, day) > rule_priority(rule, day) for day in overlapping_days(old, rule))
                for branch_id in shared for _, old in indexed_branch_rules(payload, branch_id)):
             conflicts.append(obj.request_code)
     return sorted(set(conflicts))
@@ -309,10 +309,11 @@ def retained_dates(branch_id, rule):
     kept = []
     for offset in range((end - start).days + 1):
         day = start + timedelta(days=offset)
-        if not rule_applies(rule, day):
+        if not rule_applies(rule, day) or day.isoformat() in rule.get('override_dates', ()):
             continue
-        winner = max((row for row in rows if rule_applies(row[1], day)), key=lambda row: row[0], default=None)
-        if winner and (winner[1]['kind'] == 'date' or winner[1]['closed_all_day']):
+        winner = max((row for row in rows if rule_applies(row[1], day)),
+                     key=lambda row: projection_rank(row, day), default=None)
+        if winner and (rule_priority(winner[1], day) == PRECEDENCE['date'] or winner[1]['closed_all_day']):
             kept.append(day.isoformat())
     return tuple(kept)
 
@@ -345,16 +346,21 @@ def request_conflicts(payload):
     return sorted(conflicts)
 
 
-def rules_overlap(left, right):
+def overlapping_days(left, right):
     start = max(date.fromisoformat(left['start_date']), date.fromisoformat(right['start_date']))
     def end(rule):
         return date.fromisoformat(rule.get('end_date') or rule['start_date']) if rule['kind'] != 'weekly' or rule.get('end_date') else date.max
     finish = min(end(left), end(right))
-    if start > finish:
-        return False
-    limit = 31 if left.get('excluded_dates') or right.get('excluded_dates') else 7
-    return any(rule_applies(left, start + timedelta(days=offset)) and rule_applies(right, start + timedelta(days=offset))
-               for offset in range(min(limit, (finish - start).days + 1)))
+    limit = 31 if any(rule.get(field) for rule in (left, right)
+                      for field in ('excluded_dates', 'override_dates')) else 7
+    for offset in range(min(limit, (finish - start).days + 1)):
+        target = start + timedelta(days=offset)
+        if rule_applies(left, target) and rule_applies(right, target):
+            yield target
+
+
+def rules_overlap(left, right):
+    return next(overlapping_days(left, right), None) is not None
 
 
 def approval_snapshot(obj):
@@ -452,7 +458,7 @@ def preserved_schedule(payload):
             for value in rule['excluded_dates']:
                 day = date.fromisoformat(value)
                 winner = max((row for row in approved if rule_applies(row[1], day)),
-                             key=lambda row: row[0], default=None)
+                             key=lambda row: projection_rank(row, day), default=None)
                 hours = schedule_hours(winner[1]) if winner else 'Horario vigente'
                 lines.append(f'• {names[pk]} · {schedule_date(value, weekday=True)} · {hours}')
     return lines
@@ -569,7 +575,16 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
         draft = telegram_reasoning.draft_for(config, row) if contextual else None
         if draft:
-            telegram_reasoning.queue(row, text, draft)
+            result = telegram_reasoning.explicit_replacement(draft.request.canonical_payload, text)
+            if result is None:
+                telegram_reasoning.queue(row, text, draft)
+                return
+            try:
+                telegram_reasoning.apply_correction(row, config, actor, draft, {'text': text}, result)
+            except ValueError as exc:
+                row.receipt = {'text': telegram_reasoning.CLARIFY + '\n' + str(exc)}
+                row.state = 'REPLY'
+            row.save()
             return
         row.receipt = {'text': 'No preparé una aprobación. ' + (str(exc) if isinstance(exc, ValueError) else EXAMPLES)}
         row.state = 'REPLY'

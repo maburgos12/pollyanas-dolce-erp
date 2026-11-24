@@ -5,12 +5,13 @@ from uuid import NAMESPACE_URL, uuid5
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
-from horarios_especiales.models import normalize_text
+from horarios_especiales.models import SucursalAlias, normalize_text
 from horarios_especiales.services.branch_resolution import resolve_branch_token
 from horarios_especiales.services.command_parser import _parse_time_value
 from horarios_especiales.services.google_projection import approved_rules
-from horarios_especiales.services.rules import indexed_branch_rules, rule_applies, validate_rule_payload
+from horarios_especiales.services.rules import indexed_branch_rules, projection_rank, rule_applies, validate_rule_payload
 from horarios_especiales.services.telegram_parser import WEEKDAYS
 from orquestacion.models import AgentDefinition, AgentTask
 from orquestacion.services import hours_intent, local_router
@@ -77,6 +78,88 @@ def explicit_time(span):
     return _parse_time_value(norm)
 
 
+def replacement_mode(source):
+    if re.search(r'\b(?:no\s+(?:reemplaz\w*|sustitu\w*|conserv\w*|mantien\w*)|confirmar|verificar|preguntar)\b', source):
+        return None
+    if ((re.search(r'\b(?:solo|solamente|unic[oa])\b.{0,80}\b(?:conserv\w*|mantien\w*)\b', source))
+            or (re.search(r'\bresto\b', source) and re.search(r'\b(?:conserv\w*|mantien\w*)\b', source))):
+        return 'all'
+    if (re.search(r'\b(?:reemplaz\w*|sustitu\w*)\b', source)
+            and re.search(r'\bnuevo horario\b|\bhorario (?:del borrador|propuesto|que se propone)\b', source)
+            and re.search(r'\b(?:conserv\w*|mantien\w*)\b', source)):
+        return 'dates'
+    return None
+
+
+def explicit_replacement(payload, text):
+    """Fast path only when the instruction identifies a branch and a single keep-day."""
+    if not replacement_mode(normalize_text(text)):
+        return None
+    names = {}
+    for location in payload['locations']:
+        names[location['branch_id']] = {normalize_text(location[key]) for key in ('branch_code', 'branch_name')}
+    for pk, alias in SucursalAlias.objects.filter(sucursal_id__in=names, is_active=True).values_list(
+            'sucursal_id', 'alias_normalizado'):
+        names[pk].add(alias)
+    words = list(re.finditer(r'\w+', text))
+    spans = {}
+    days = {}
+    for i, word in enumerate(words):
+        weekday = normalize_text(word[0])
+        if weekday in WEEKDAYS:
+            days[weekday] = word[0]
+        for j in range(i, min(i + 6, len(words))):
+            span = text[word.start():words[j].end()]
+            normalized = normalize_text(span)
+            for pk, labels in names.items():
+                if normalized in labels and len(span) > len(spans.get(pk, '')):
+                    spans[pk] = span
+    if len(spans) != 1 or len(days) != 1:
+        return None
+    return {'action': 'replace_with_draft', 'branch': next(iter(spans.values())),
+            'detail': next(iter(days.values()))}
+
+
+def replace_dates(rule, source, weekday, approved):
+    mode = replacement_mode(source)
+    if not mode or rule['kind'] != 'range' or 'branch_ids' not in rule or rule['closed_all_day']:
+        raise ValueError('Indica qué fechas se reemplazan con el horario de este borrador.')
+    start, end = (date.fromisoformat(rule[key]) for key in ('start_date', 'end_date'))
+    period = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    if {day for day in WEEKDAYS if re.search(r'\b' + day + r'\b', source)} != {weekday}:
+        raise ValueError('Indica un solo día de cierre que se conserva.')
+    keep = {day.isoformat() for day in period if day.weekday() == WEEKDAYS.index(weekday)}
+    for value in keep:
+        day = date.fromisoformat(value)
+        winner = max((row for row in approved if rule_applies(row[1], day)),
+                     key=lambda row: projection_rank(row, day), default=None)
+        if not winner or not winner[1]['closed_all_day']:
+            raise ValueError('Ese día no figura como cerrado en el horario previamente aprobado.')
+    if not keep:
+        raise ValueError('El día que quieres conservar queda fuera del periodo.')
+    previous = set(rule.get('excluded_dates', ()))
+    overridden = set(rule.get('override_dates', ()))
+    candidates = previous - keep
+    numbers = {int(raw) for raw in re.findall(r'\b\d+\b', source)}
+    if mode == 'dates':
+        mapped = {number: [day.isoformat() for day in period if day.day == number] for number in numbers}
+        if not mapped or any(len(values) != 1 or values[0] not in candidates | overridden for values in mapped.values()):
+            raise ValueError('Indica fechas únicas dentro del periodo que la tarjeta marca como conservadas.')
+        replace = {values[0] for values in mapped.values()}
+    else:
+        named_days = {date.fromisoformat(value).day for value in candidates | overridden} | {start.day}
+        if numbers - named_days:
+            raise ValueError('Para aplicar el horario en todos los demás días, indica solo el cierre que se conserva.')
+        replace = candidates
+    updated = {**rule, 'excluded_dates': sorted((previous | keep) - replace)}
+    overrides = sorted((overridden | replace) - keep)
+    if overrides:
+        updated['override_dates'] = overrides
+    else:
+        updated.pop('override_dates', None)
+    return updated
+
+
 def revise(payload, data, result):
     hours_intent.validate_output(data, result)
     if validate_rule_payload(payload):
@@ -97,6 +180,25 @@ def revise(payload, data, result):
         raise ValueError('La sucursal necesita una instrucción completa para este periodo.')
     index, rule = scoped[0]
     rules = list(payload['rules'])
+    if action == 'replace_with_draft':
+        verified = explicit_replacement(payload, data['text'])
+        weekday = normalize_text(result['detail'])
+        if not verified or normalize_text(verified['detail']) != weekday:
+            raise ValueError('Indica una sola sucursal, las fechas que cambian y el día que se conserva.')
+        named, name_errors = resolve_branch_token(verified['branch'], reference_date=reference)
+        if name_errors or len(named) != 1 or named[0].branch.pk != branch.pk:
+            raise ValueError('La sucursal de la corrección no está confirmada.')
+        if weekday not in WEEKDAYS:
+            raise ValueError('Indica el día de semana que se conserva cerrado.')
+        changed = replace_dates(rule, source, weekday, approved_rules(branch.pk))
+        targets = rule['branch_ids']
+        if len(targets) > 1:
+            rules[index] = {**rule, 'branch_ids': [pk for pk in targets if pk != branch.pk]}
+            rules.insert(index + 1, {**changed, 'branch_ids': [branch.pk]})
+        else:
+            rules[index] = changed
+        note = f'{branch.nombre} toma el horario nuevo en las fechas indicadas. Se conserva el cierre del {result["detail"].lower()}.'
+        return all_ids, rules, note
     if action == 'keep_closed':
         weekday = normalize_text(result['detail'])
         if (weekday not in WEEKDAYS or rule['kind'] not in {'date', 'range'}
@@ -110,7 +212,7 @@ def revise(payload, data, result):
                  if (start + timedelta(days=i)).weekday() == WEEKDAYS.index(weekday)]
         approved = approved_rules(branch.pk)
         for day in dates:
-            winner = max((r for r in approved if rule_applies(r[1], day)), key=lambda r: r[0], default=None)
+            winner = max((r for r in approved if rule_applies(r[1], day)), key=lambda r: projection_rank(r, day), default=None)
             if not winner or not winner[1]['closed_all_day'] or rule_applies(rule, day) and not rule['closed_all_day']:
                 raise ValueError('No pude confirmar ese cierre previo dentro de este borrador.')
         if not dates:
@@ -141,6 +243,27 @@ def revise(payload, data, result):
     return all_ids, rules, f'{branch.nombre} queda de {window["open"]} a {window["close"]} en este borrador.'
 
 
+def apply_correction(row, config, actor, draft, data, result):
+    from horarios_especiales.services import telegram_bot as bot
+    from horarios_especiales.services.requests import lock_branch_ids
+
+    lock_branch_ids([item['branch_id'] for item in draft.request.canonical_payload['locations']])
+    ids, rules, note = revise(draft.request.canonical_payload, data, result)
+    raw = draft.request.raw_command + '\n\nCorrección: ' + data['text']
+    bot.build_preview(row, raw, config, actor, ids, rules, note=note, after=row.update_id)
+
+
+def timely_result(task, deadline):
+    if not task or task.status != 'resolved' or not deadline:
+        return False
+    value = task.output_payload.get('finished_at')
+    try:
+        finished = parse_datetime(value) if isinstance(value, str) else None
+        return bool(finished and timezone.is_aware(finished) and finished <= deadline)
+    except ValueError:
+        return False
+
+
 @transaction.atomic
 def advance(row, config):
     from horarios_especiales.services import telegram_bot as bot
@@ -155,7 +278,7 @@ def advance(row, config):
     task = AgentTask.objects.filter(pk=row.receipt['task_id'], task_type=local_router.TASK,
                                    agent__code=hours_intent.AGENT, input_payload__kind=hours_intent.KIND).first()
     draft = draft_for(config, row)
-    expired = not row.expires_at or row.expires_at <= timezone.now()
+    expired = (not row.expires_at or row.expires_at <= timezone.now()) and not timely_result(task, row.expires_at)
     if (not enabled() or expired or not draft or draft.pk != row.receipt['draft_id']
             or draft.revision != row.receipt['draft_revision'] or not task
             or task.status in ('blocked', 'cancelled') or task.output_payload.get('error')):
@@ -164,14 +287,7 @@ def advance(row, config):
         return
     else:
         try:
-            from horarios_especiales.services.requests import lock_branch_ids
-
-            lock_branch_ids([item['branch_id'] for item in draft.request.canonical_payload['locations']])
-            data = task.input_payload['data']
-            ids, rules, note = revise(draft.request.canonical_payload, data, task.output_payload.get('result'))
-            # Raw record of the revision contains the original instruction and the author's correction.
-            raw = draft.request.raw_command + '\n\nCorrección: ' + data['text']
-            bot.build_preview(row, raw, config, actor, ids, rules, note=note, after=row.update_id)
+            apply_correction(row, config, actor, draft, task.input_payload['data'], task.output_payload.get('result'))
         except ValueError as exc:
             row.state, row.receipt = 'REPLY', {'text': CLARIFY + '\n' + str(exc)}
     row.save()

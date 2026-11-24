@@ -217,9 +217,14 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         job = local_router.claim('mac_ia_02')
         self.assertEqual(job['kind'], 'hours_draft_edit')
         self.assertEqual(job['data']['text'], correction)
-        local_router.finish(job['id'], job['lease'], result={
+        receipt = local_router.finish(job['id'], job['lease'], result={
             'action': 'keep_closed', 'branch': 'Túnel', 'detail': 'miércoles',
         })
+        from orquestacion.models import AgentTask
+        finished_at = datetime.fromisoformat(AgentTask.objects.get(pk=receipt['id']).output_payload['finished_at'])
+        new.expires_at = finished_at
+        new.save(update_fields=['expires_at'])
+        # The result arrived on time, even if Telegram's next poll is after the deadline.
         poll_once(self.config, client)
         new.refresh_from_db()
         self.assertEqual(new.state, 'PREVIEW', new.receipt)
@@ -233,6 +238,53 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         process_callback(self.callback(new, id=3), self.config, self.user)
         new.request.refresh_from_db()
         self.assertEqual(new.request.approved_by, self.user)
+
+    def test_replaces_tunnel_dates_and_keeps_only_wednesday_in_one_preview(self):
+        from django.core.management import call_command
+        from horarios_especiales.services.google_projection import approved_rules, projection_fields
+        from horarios_especiales.services.rules import resolve_approved_rule
+        from horarios_especiales.tests_google_projection import REGULAR
+        from orquestacion.models import AgentTask
+        from orquestacion.services import local_router
+
+        local_router.configure(enabled=True)
+        call_command('configure_hours_reasoning', 'enable')
+        tunnel = self.branches['EL_TUNEL']
+        SucursalAlias.objects.create(sucursal=tunnel, alias='Túnel')
+        prior, payload = create_request_from_rules(raw_text='Horarios previos de El Túnel', actor=self.user,
+            branch_ids=[tunnel.pk], rules=[
+                {'kind': 'date', 'start_date': f'2026-11-{day}', 'closed_all_day': False,
+                 'time_windows': [{'open': '14:00', 'close': '22:00'}]} for day in (23, 24)
+            ] + [{'kind': 'weekly', 'start_date': '2026-11-22', 'weekdays': [2], 'closed_all_day': True, 'time_windows': []}])
+        approve_request(request_obj=prior, actor=self.user, expected_revision=payload['revision'])
+        notice = 'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm del 23 al 29 de noviembre'
+        first = 'Los 23 y 24, en el túnel, deben de reemplazarse con el nuevo horario que se propone y el día miércoles se mantiene igual'
+        second = 'El único horario que se conserva de el túnel es el miércoles que es cerrado'
+        for index, correction in ((1, first), (3, second)):
+            client = FakeTelegram([self.update(notice, id=index), self.update(correction, id=index+1)])
+            poll_once(self.config, client)
+            row = TelegramHoursUpdate.objects.get(update_id=index+1)
+            self.assertEqual(row.state, 'PREVIEW', row.receipt)
+            self.assertFalse(AgentTask.objects.filter(input_payload__kind='hours_draft_edit').exists())
+            self.assertIn('miércoles 25 nov 2026 · Cerrado', row.receipt['text'])
+            self.assertNotIn('14:00–22:00', row.receipt['text'])
+            self.assertIn('23 nov 2026 al 24 nov 2026', row.receipt['text'])
+            self.assertIsNone(row.request.approved_at)
+        self.assertEqual(resolve_approved_rule(tunnel, date(2026, 11, 23))['request_id'], prior.pk)
+        process_callback(self.callback(row, id=5), self.config, self.user)
+        row.request.refresh_from_db()
+        self.assertEqual(row.request.approved_by, self.user)
+        for day in (23, 24, 26, 27, 28, 29):
+            effective = resolve_approved_rule(tunnel, date(2026, 11, day))
+            self.assertEqual(effective['windows'], [{'open': '09:00', 'close': '19:00'}])
+            self.assertEqual(effective['request_id'], row.request.pk)
+        self.assertTrue(resolve_approved_rule(tunnel, date(2026, 11, 25))['closed_all_day'])
+        self.assertTrue(resolve_approved_rule(tunnel, date(2026, 12, 2))['closed_all_day'])
+        _, owned, _, _, _ = projection_fields(current={'regularHours': REGULAR},
+            rows=approved_rules(tunnel.pk), today=date(2026, 11, 23), owned={})
+        self.assertEqual(owned['2026-11-23'][0]['closeTime']['hours'], 19)
+        self.assertEqual(owned['2026-11-24'][0]['closeTime']['hours'], 19)
+        self.assertNotIn('2026-11-25', owned)
 
     def test_local_ai_ambiguous_hour_pauses_button_but_keeps_draft_for_next_edit(self):
         from django.core.management import call_command
