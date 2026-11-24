@@ -5310,8 +5310,8 @@ if (operation === "refresh-during-capture") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v101-carga-disponible")
-        self.assertIn("?v=route-control-v101-carga-disponible", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v102-carga-disponible")
+        self.assertIn("?v=route-control-v102-carga-disponible", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")

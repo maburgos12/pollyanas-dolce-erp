@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v101-carga-disponible";
+const CACHE_NAME = "pollyanas-logistica-pwa-v102-carga-disponible";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v63-carga-tramos-consolidada",
@@ -23,6 +23,12 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+
+  // El estado de una actualización cambia de 202 a terminado; nunca reutilizarlo.
+  if (event.request.cache === "no-store") {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   if (url.pathname.startsWith("/media/")) {
     // Reauthorize historical files online; retain offline copies of public hot media only.
