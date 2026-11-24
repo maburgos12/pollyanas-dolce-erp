@@ -2954,3 +2954,74 @@ class RespuestaClima(models.Model):
     respuestas = models.JSONField()
 
 from .models_empleado_mes import EvaluacionEmpleadoMes, PeriodoEmpleadoMes  # noqa: E402,F401
+
+
+class PermisoContingencia(models.Model):
+    """Autorización empresarial por días completos; no modifica salario ni horarios."""
+    clave = models.CharField(max_length=80, unique=True)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    motivo = models.CharField(max_length=16, choices=[('seguridad', 'Seguridad'), ('clima', 'Clima'), ('salud', 'Salud'), ('otro', 'Otro')])
+    descripcion = models.TextField()
+    evidencia = models.JSONField(default=list)
+    alcance = models.CharField(max_length=16, choices=[('empresa', 'Empresa'), ('empleados', 'Empleados explícitos')])
+    tratamiento_salarial = models.CharField(max_length=16, choices=[('conservar', 'Conservar sin ajuste automático'), ('con_goce', 'Con goce sin ajuste automático'), ('sin_goce', 'Sin goce: revisión salarial separada')])
+    estado = models.CharField(max_length=16, default='borrador', choices=[('borrador', 'Borrador'), ('aprobado', 'Aprobado'), ('revocado', 'Revocado')])
+    revision = models.PositiveIntegerField(default=1)
+    datos = models.JSONField(default=dict)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            anterior = type(self).objects.get(pk=self.pk)
+            inmutables = ('clave','fecha_inicio','fecha_fin','motivo','descripcion','evidencia','alcance','tratamiento_salarial','datos','creado_por_id','creado_en')
+            if any(getattr(self, campo) != getattr(anterior, campo) for campo in inmutables):
+                raise ValidationError("La fuente de contingencia es inmutable; cree otra autorización.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Las autorizaciones se revocan; no se elimina historia.")
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=Q(fecha_fin__gte=models.F('fecha_inicio')), name='rrhh_contingencia_rango_valido')]
+
+
+class BeneficiarioContingencia(models.Model):
+    permiso = models.ForeignKey(PermisoContingencia, on_delete=models.PROTECT, related_name='beneficiarios')
+    empleado = models.ForeignKey(Empleado, on_delete=models.PROTECT, related_name='contingencias')
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    snapshot = models.JSONField(default=dict)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("El padrón aprobado es inmutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("El padrón aprobado se conserva.")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['permiso', 'empleado'], name='rrhh_contingencia_beneficiario_unico')]
+
+
+class EventoContingencia(models.Model):
+    permiso = models.ForeignKey(PermisoContingencia, on_delete=models.PROTECT, related_name='eventos')
+    revision = models.PositiveIntegerField()
+    accion = models.CharField(max_length=16)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    creado_en = models.DateTimeField(auto_now_add=True)
+    digest = models.CharField(max_length=64)
+    snapshot = models.JSONField(default=dict)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("La bitácora de contingencias es inmutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("La bitácora de contingencias se conserva.")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['permiso', 'revision'], name='rrhh_contingencia_evento_revision')]

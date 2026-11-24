@@ -240,12 +240,16 @@ class BonoVentasEmpleado(models.Model):
     def _es_repartidor(self) -> bool:
         return (self.empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR"
 
-    def recalcular(self) -> None:
+    def recalcular(self, *, dias_neutrales=None) -> None:
         cfg = self.periodo
         base = _money(cfg.bono_base)
+        from rrhh.services_cobertura_permisos import dias_neutrales_bono
+        neutros = dias_neutrales_bono(self.empleado, *cfg.rango_fechas()) if dias_neutrales is None else dias_neutrales
         dias_base = self._dias_base()
+        if not self.dias_trabajados:
+            dias_base = max(dias_base - neutros, 0)
         dias_laborables_cfg = int(cfg.dias_laborables or dias_base or 0)
-        dias_exigibles = cfg.dias_laborables_exigibles(total=dias_laborables_cfg)
+        dias_exigibles = max(cfg.dias_laborables_exigibles(total=dias_laborables_cfg) - neutros, 0)
         dias_asistencia = int(self.dias_asistencia or self.dias_trabajados or 0)
         self.pasa_asistencia = (dias_exigibles - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme

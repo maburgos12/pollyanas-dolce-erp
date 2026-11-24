@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from django.contrib.auth.models import AbstractBaseUser
 from django.contrib.auth import get_user_model
@@ -69,6 +69,10 @@ def reevaluar_asistencia_permiso(
         from .services_asistencia_reglas import evaluar_rango_asistencia
 
         evaluar_rango_asistencia(inicio, fin, empleados=[empleado])
+        from .services_asistencia_alertas import reparar_alertas_faltas
+        # Reparar únicamente la disciplina posterior; no generar checadas/extra.
+        reparar_alertas_faltas(empleado,inicio,min(fin+timedelta(days=29),timezone.localdate()),
+            comentario=f"Reevaluación por permiso personal {permiso.pk}.")
 
     transaction.on_commit(_correr)
 

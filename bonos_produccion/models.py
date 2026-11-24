@@ -346,13 +346,17 @@ class BonoProduccionEmpleado(models.Model):
             return Decimal("0.00")
         return _money(base * Decimal(pct) / Decimal("100"))
 
-    def recalcular(self) -> None:
+    def recalcular(self, *, dias_neutrales=None, regla_area=None) -> None:
         cfg = self.periodo
-        regla = cfg.get_regla_area(self.area)
+        regla = cfg.get_regla_area(self.area) if regla_area is None else regla_area
         base = _money(cfg.get_monto_area(self.area))
+        from rrhh.services_cobertura_permisos import dias_neutrales_bono
+        neutros = dias_neutrales_bono(self.empleado, *cfg.rango_fechas()) if dias_neutrales is None else dias_neutrales
         dias_base = self._base_dias()
+        if not self.dias_trabajados:
+            dias_base = max(dias_base - neutros, 0)
         total_laborables = int(cfg.dias_laborables or dias_base or 0)
-        dias_exigibles = cfg.dias_laborables_exigibles(total=total_laborables)
+        dias_exigibles = max(cfg.dias_laborables_exigibles(total=total_laborables) - neutros, 0)
 
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= regla.limite_uniforme
         faltas = (
