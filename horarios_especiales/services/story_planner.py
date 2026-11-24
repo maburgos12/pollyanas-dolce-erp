@@ -12,7 +12,7 @@ ORIGIN = 'https://ads.pollyanasdolce.com/api'
 ROOT = '/social-scheduler/hours-story-drafts'
 DIGEST = r'[a-f0-9]{64}'
 DRAFT = rf'hours:[1-9][0-9]{{0,18}}:{DIGEST}:[1-9][0-9]{{0,18}}'
-PATH = re.compile(rf'{ROOT}(?:/assets(?:/{DIGEST}/preview)?|/invalidate|/{DRAFT}(?:/approve)?)?')
+PATH = re.compile(rf'{ROOT}(?:/assets(?:/template|/{DIGEST}/preview)?|/invalidate|/{DRAFT}(?:/approve)?)?')
 
 
 class MarketingError(Exception):

@@ -1,5 +1,4 @@
 """Durable preparation and second approval for the private hours bot."""
-import base64
 import hashlib
 import re
 import secrets
@@ -12,7 +11,7 @@ from django.utils import timezone
 
 from horarios_especiales.models import SolicitudHorarioEspecial, TelegramHoursStory, TelegramHoursUpdate
 from horarios_especiales.services.requests import _lock_request_branches
-from horarios_especiales.services.story_art import TITLE, ZONE, build_schedule, render_notice
+from horarios_especiales.services.story_art import TITLE, ZONE, build_schedule
 from horarios_especiales.services.story_planner import DIGEST, ROOT, MarketingClient, MarketingError, encode
 
 
@@ -240,15 +239,22 @@ def step(story, telegram, marketing, *, notify):
     from horarios_especiales.services.telegram_bot import TelegramUnavailable
 
     if story.state == 'ASSET':
-        image = render_notice(story.draft['caption'])
-        asset = marketing.request('POST', ROOT + '/assets', encode({
-            'image_base64': base64.b64encode(image).decode(), 'duration_seconds': 20,
+        asset = marketing.request('POST', ROOT + '/assets/template', encode({
+            'request_id': story.request_id, 'erp_revision_digest': story.revision,
+            'art_revision': story.art_revision, 'caption': story.draft['caption'], 'duration_seconds': 20,
         }))
         asset_id, image_hash = asset.get('asset_id', ''), asset.get('image_sha256', '')
-        if not re.fullmatch(DIGEST, asset_id) or not re.fullmatch(DIGEST, image_hash):
+        source_hash = asset.get('template_source_sha256', '')
+        if (any(not isinstance(value, str) or not re.fullmatch(DIGEST, value)
+                for value in (asset_id, image_hash, source_hash))
+                or not isinstance(asset.get('template_id'), str)
+                or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,79}', asset['template_id'])
+                or asset.get('template_style_version') != 'photo-serif-v1'):
             raise MarketingError('invalid_asset_response', retryable=True)
         story.draft['asset_id'] = asset_id
         story.remote['image_sha256'] = image_hash
+        for key in ('template_id', 'template_source_sha256', 'template_style_version'):
+            story.remote[key] = asset[key]
         story.state = 'DRAFT'
     elif story.state == 'DRAFT':
         reply = marketing.request('POST', ROOT, encode(story.draft))

@@ -193,12 +193,31 @@ resultado en la siguiente consulta mientras el borrador original siga vigente.
 
 La aprobación de horarios no aprueba una publicación social. Con la integración
 habilitada, su recibo ofrece **Preparar historia**. El ERP guarda una revisión de
-arte independiente, genera un aviso vertical y obtiene la imagen normalizada del
-planificador. Envía esos bytes al chat privado con otro nonce, mensaje y botón
+arte independiente, pide una plantilla fotográfica al planificador y obtiene su
+imagen normalizada. Envía esos bytes al chat privado con otro nonce, mensaje y botón
 **Aprobar imagen y programación**. No publica posts ni reels: sólo Stories de
-Facebook e Instagram. El arte actual es un aviso tipográfico con el logo; todavía
-no alterna el banco de fotografías. La vista previa permite decidir sobre la
-imagen real antes de aprobarla.
+Facebook e Instagram. El arte usa el banco de fotos y el estilo ya aprobados:
+rebanadas, pastel de chocolate y galletas, con texto blanco serif centrado sobre
+la foto, sin recuadro. La vista previa permite decidir sobre la imagen real antes
+de aprobarla. No hay fallback al aviso liso de pruebas.
+
+`POST /assets/template` recibe la clave estable de solicitud/hash ERP/arte y el
+texto. Marketing reserva la foto sin repetir la elección anterior y congela el
+JPEG antes de codificar video. Un reintento conserva exactamente el mismo arte;
+no avanza la rotación ni cambia una imagen ya revisada. ERP conserva
+`template_id`, `template_source_sha256` y `template_style_version=photo-serif-v1`
+junto al asset y su hash. Falta de catálogo/foto o respuesta sin estos datos no
+autoriza otro diseño. El banco se instala de las fuentes originales verificadas
+durante el despliegue; no se infieren fotos por una búsqueda de diseños ajenos.
+El ID es un slug validado, no una enumeración cerrada a las tres fotos iniciales:
+añadir otra fotografía aprobada al catálogo de Marketing no exige cambiar ERP.
+
+Los ejemplos y fotografías nuevos que Mauricio apruebe en este hilo amplían la
+referencia de la plantilla mediante el catálogo controlado: foto, versión del
+estilo, tipografía, tamaños, color, alineación y ubicación del texto. Una nueva
+foto no autoriza cambiar automáticamente la identidad visual. El nombre exacto
+de la fuente no se infiere de una imagen rasterizada; una reconstrucción debe
+compararse visualmente con la referencia antes de fijarse como versión aprobada.
 
 Aplicar migración `horarios_especiales.0005`. Se reutilizan el polling, la identidad
 ERP/Telegram y la primera aprobación auditada; `TelegramHoursStory` es el outbox

@@ -1,21 +1,12 @@
-"""Create a vertical notice and schedule only periods compatible with Story lifetime."""
+"""Schedule approved Marketing photo templates within the supported Story lifetime."""
 from datetime import date, datetime, time, timedelta
-from io import BytesIO
-from pathlib import Path
 from zoneinfo import ZoneInfo
-
-from PIL import Image, ImageDraw, ImageFont
-import reportlab
 
 from horarios_especiales.services.rules import rule_applies
 
 ZONE = ZoneInfo('America/Mazatlan')
 LIFETIME = timedelta(days=1, minutes=10)
 TITLE = 'Horario especial de sucursales'
-LOGO = Path(__file__).resolve().parents[2] / 'static/operacion/pollyanas-logo-transparent.png'
-# ReportLab is a pinned existing dependency and ships this Unicode font on
-# both macOS and the Linux worker. Pillow's default subset loses Spanish text.
-FONT = Path(reportlab.__file__).resolve().parent / 'fonts/Vera.ttf'
 
 
 def build_schedule(rules, now):
@@ -49,37 +40,3 @@ def build_schedule(rules, now):
         'review_expires_at': review_expires.isoformat(), 'platforms': ['instagram', 'facebook'],
         'placement': 'story', 'publish_mode': 'scheduled', 'schedule_windows': windows,
     }, note
-
-
-def render_notice(text):
-    image = Image.new('RGB', (1080, 1920), '#fff7ee')
-    draw = ImageDraw.Draw(image)
-    ink, accent = '#46192c', '#823750'
-    title_font = ImageFont.truetype(str(FONT), size=68)
-    body_font = ImageFont.truetype(str(FONT), size=37)
-    footer_font = ImageFont.truetype(str(FONT), size=28)
-    with Image.open(LOGO) as original:
-        logo = original.convert('RGBA')
-        logo.thumbnail((440, 155))
-        image.paste(logo, ((1080 - logo.width) // 2, 215), logo)
-    draw.text((540, 420), 'Horario especial', font=title_font, fill=ink, anchor='mt')
-    draw.line((112, 532, 968, 532), fill=accent, width=4)
-    y = 595
-    for paragraph in text.splitlines():
-        line = ''
-        for word in paragraph.split():
-            candidate = (line + ' ' + word).strip()
-            if draw.textlength(candidate, font=body_font) > 850:
-                draw.text((112, y), line, font=body_font, fill=ink)
-                y += 53
-                line = word
-            else:
-                line = candidate
-        draw.text((112, y), line, font=body_font, fill=ink)
-        y += 78
-        if y > 1610:
-            raise ValueError('El aviso completo no cabe en una historia. Reduce el alcance del aviso.')
-    draw.text((540, 1690), 'pollyanasdolce.com/sucursales', font=footer_font, fill=accent, anchor='mt')
-    target = BytesIO()
-    image.save(target, format='JPEG', quality=90)
-    return target.getvalue()

@@ -1,7 +1,6 @@
 from datetime import datetime
 import copy
 import hashlib
-from io import BytesIO
 from datetime import timedelta
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
@@ -10,9 +9,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
-from PIL import Image
-
-from horarios_especiales.services.story_art import build_schedule, render_notice
+from horarios_especiales.services.story_art import build_schedule
 
 
 class StoryArtTests(SimpleTestCase):
@@ -32,17 +29,6 @@ class StoryArtTests(SimpleTestCase):
         rules = [{'kind': 'date', 'start_date': '2026-12-01'}]
         with self.assertRaisesRegex(ValueError, '24 horas'):
             build_schedule(rules, self.now)
-
-    def test_image_fits_required_format(self):
-        raw = render_notice('1 al 3 de diciembre\n• 09:00–19:00 · Sucursal Bamoa\nMiércoles · El Túnel cerrado')
-        with Image.open(BytesIO(raw)) as image:
-            self.assertEqual((image.format, image.size), ('JPEG', (1080, 1920)))
-
-    def test_spanish_accents_and_schedule_symbols_have_real_glyphs(self):
-        missing_glyph = render_notice('\U0010ffff')
-        for character in ('é', 'ú', 'ñ', '•', '–'):
-            with self.subTest(character=character):
-                self.assertNotEqual(render_notice(character), missing_glyph)
 
 
 from horarios_especiales.models import SolicitudHorarioEspecial, TelegramHoursStory, TelegramHoursUpdate
@@ -116,6 +102,57 @@ class StoryLifecycleTests(TestCase):
         self.assertEqual(self.story.state, 'APPROVE')
         self.assertEqual(self.story.approval_body, '{"immutable":"receipt"}')
         self.assertNotIn('post_ids', self.story.remote)
+
+    def test_asset_preparation_uses_photographic_template_and_stable_intent(self):
+        import json
+        self.story.state = 'ASSET'
+        self.story.draft['caption'] = 'Sucursal Sinaloa de Leyva\nHoy cierra a las 6 p.m.'
+        self.marketing.request.return_value = dict(asset_id='d' * 64, image_sha256='e' * 64,
+            template_id='rebanadas', template_source_sha256='f' * 64, template_style_version='photo-serif-v1')
+        for _ in range(2):
+            self.story.state = 'ASSET'  # Response lost before saving the first acknowledgement.
+            stories.process(self.story, self.telegram, self.marketing, True, timezone.now())
+            self.story.refresh_from_db()
+        calls = self.marketing.request.call_args_list
+        self.assertEqual(calls[0].args[1], '/social-scheduler/hours-story-drafts/assets/template')
+        self.assertEqual(calls[0].args[2], calls[1].args[2])
+        self.assertEqual(json.loads(calls[0].args[2]), dict(request_id=self.request.pk,
+            erp_revision_digest=self.story.revision, art_revision=1, caption=self.story.draft['caption'], duration_seconds=20))
+        self.assertEqual(self.story.state, 'DRAFT')
+        self.assertEqual(self.story.remote['template_id'], 'rebanadas')
+        self.assertEqual(self.story.remote['template_source_sha256'], 'f' * 64)
+        self.assertEqual(self.story.remote['template_style_version'], 'photo-serif-v1')
+        self.telegram.call.assert_not_called()
+
+    def test_unverified_template_response_cannot_fall_back_to_plain_art(self):
+        self.story.state = 'ASSET'
+        self.story.draft['caption'] = 'Horario especial'
+        self.marketing.request.return_value = dict(asset_id='d' * 64, image_sha256='e' * 64)
+        stories.process(self.story, self.telegram, self.marketing, True, timezone.now())
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.state, 'ASSET')
+        self.assertEqual(self.story.error_code, 'invalid_asset_response')
+        self.telegram.call.assert_not_called()
+
+    def test_new_catalog_background_needs_no_erp_code_change(self):
+        self.story.state = 'ASSET'
+        self.story.draft['caption'] = 'Sucursal El Túnel\nHoy cierra a las 5 p.m.'
+        self.marketing.request.return_value = dict(asset_id='d' * 64, image_sha256='e' * 64,
+            template_id='cupcakes-nueva-foto', template_source_sha256='f' * 64, template_style_version='photo-serif-v1')
+        stories.process(self.story, self.telegram, self.marketing, True, timezone.now())
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.state, 'DRAFT')
+        self.assertEqual(self.story.remote['template_id'], 'cupcakes-nueva-foto')
+
+    def test_template_identity_cannot_be_a_path(self):
+        self.story.state = 'ASSET'
+        self.story.draft['caption'] = 'Horario especial'
+        self.marketing.request.return_value = dict(asset_id='d' * 64, image_sha256='e' * 64,
+            template_id='../../otra', template_source_sha256='f' * 64, template_style_version='photo-serif-v1')
+        stories.process(self.story, self.telegram, self.marketing, True, timezone.now())
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.state, 'ASSET')
+        self.assertEqual(self.story.error_code, 'invalid_asset_response')
 
     def test_revocation_survives_terminal_error_without_notification(self):
         self.story.state = 'INVALIDATE'
@@ -248,13 +285,14 @@ class StoryRoundTripTests(TestCase):
             self.assertIn((first + timedelta(days=3)).strftime('%d/%m'), story.remote['schedule_note'])
             with self.assertRaisesRegex(ValueError, 'ya tiene una historia'):
                 stories.stage(source, user)
-            image = render_notice(story.draft['caption'])
+            image = b'synthetic-normalized-photographic-template-preview'
             remote = dict(draft_id=f'hours:{obj.pk}:{story.revision}:1', draft_digest='c' * 64,
                           erp_revision_digest=story.revision, art_revision=1)
             marketing, telegram = Mock(), Mock()
             telegram.call.return_value = dict(message_id=500, chat=dict(id=777, type='private'),
                                               **{'from': dict(id=12345, is_bot=True)})
-            marketing.request.side_effect = [dict(asset_id='d' * 64, image_sha256=hashlib.sha256(image).hexdigest()),
+            marketing.request.side_effect = [dict(asset_id='d' * 64, image_sha256=hashlib.sha256(image).hexdigest(),
+                template_id='rebanadas', template_source_sha256='f' * 64, template_style_version='photo-serif-v1'),
                                              dict(remote, status='awaiting_approval'), image]
             for _ in range(3):
                 stories.process(story, telegram, marketing, True, timezone.now())
