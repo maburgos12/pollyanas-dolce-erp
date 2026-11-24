@@ -99,8 +99,8 @@ class RestoreGatesTests(unittest.TestCase):
             with patch.object(health, 'STATE', state), patch.object(rotator, 'BACKUPS', root), patch.object(rotator, 'RECEIPTS', canonical), patch.object(rotator, 'local_set', return_value=(stem + '.manifest', 'a' * 64, {})), patch.object(rotator, 'bounded_check_proof') as probe, patch.object(health, 'run', side_effect=lambda args: payload if 'restore' in args else '') as run, patch.object(health, 'atomic', wraps=health.atomic) as publish:
                 health.maintain(rotator, verify_only=True)
                 private = state / 'verification-receipts'
-                self.assertEqual(len(publish.call_args_list), 2)
-                self.assertTrue(all(call.args[0].parent == private for call in publish.call_args_list))
+                self.assertEqual([call.args[0].parent for call in publish.call_args_list],
+                                 [private / 'pending-restores'] * 2 + [private] * 2)
                 self.assertEqual(rotator.read_receipt(private / (stem + '.json'), stem), proof)
                 with self.assertRaises(FileNotFoundError):
                     rotator.read_receipt(canonical / (stem + '.json'), stem)
@@ -112,6 +112,65 @@ class RestoreGatesTests(unittest.TestCase):
                 self.assertEqual(run.call_args.args[0][-2:], [health.NAS_ALIAS, 'status'])
                 publish.assert_not_called()
                 self.assertEqual(probe.call_count, 2)
+
+    def test_smb_failure_reuses_only_intact_restore_of_same_manifest(self):
+        for change in ('none', 'evidence', 'manifest'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                private, canonical = root / 'private', root / 'canonical'
+                private.mkdir(mode=0o700)
+                canonical.mkdir(mode=0o700)
+                stem = 'backup_20261123_020001'
+                (root / (stem + '.media.json')).write_text('{"files": []}')
+                checksum = 'a' * 64
+                evidence = 'SQL and media restored on NAS'
+
+                def restore(_args):
+                    proof = dict(point=stem, manifest_sha256=checksum, verified_media=3,
+                                 evidence_sha256=hashlib.sha256(evidence.encode()).hexdigest(),
+                                 postgresql_major=16, sql_restore_exit=0, media_restore_exit=0,
+                                 verified_references=1, media_generations=['latest'])
+                    return json.dumps(dict(receipt=proof, evidence=evidence))
+
+                rotator = module('rotate_verified_backups')
+                with patch.object(rotator, 'BACKUPS', root), patch.object(rotator, 'RECEIPTS', canonical), patch.object(
+                    rotator, 'local_set', side_effect=lambda *_: ('manifest', checksum, {})
+                ), patch.object(rotator, 'bounded_check_proof', side_effect=[TimeoutError('SMB'), None]) as probe, patch.object(
+                    health, 'run', side_effect=restore
+                ) as remote:
+                    with self.assertRaisesRegex(TimeoutError, 'SMB'):
+                        health.verify_point(rotator, stem, receipts=private)
+                    pending = private / 'pending-restores' / (stem + '.json')
+                    self.assertEqual(rotator.read_receipt(pending, stem)['manifest_sha256'], checksum)
+                    self.assertFalse((private / pending.name).exists())
+                    self.assertEqual(list(canonical.iterdir()), [])
+                    if change == 'evidence':
+                        pending.with_suffix('.restore.log').write_text('tampered')
+                    elif change == 'manifest':
+                        checksum = 'b' * 64
+                    self.assertEqual(health.verify_point(rotator, stem, receipts=private)['manifest_sha256'], checksum)
+                    self.assertEqual(remote.call_count, 1 if change == 'none' else 2)
+                    self.assertEqual(probe.call_count, 2)
+                    self.assertEqual(rotator.read_receipt(private / pending.name, stem)['manifest_sha256'], checksum)
+                    self.assertEqual(list(canonical.iterdir()), [])
+
+    def test_pending_restore_directory_symlink_is_not_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            private = root / 'private'
+            private.mkdir(mode=0o700)
+            unrelated = root / 'unrelated'
+            unrelated.mkdir(mode=0o700)
+            (private / 'pending-restores').symlink_to(unrelated, target_is_directory=True)
+            rotator = types.SimpleNamespace(
+                BACKUPS=root, RECEIPTS=root / 'canonical', require=nas.require,
+                local_set=Mock(return_value=('manifest', 'a' * 64, {})),
+                read_receipt=Mock(side_effect=FileNotFoundError), bounded_check_proof=Mock())
+            with patch.object(health, 'run') as restore, self.assertRaisesRegex(ValueError, 'Pending restores'):
+                health.verify_point(rotator, 'backup_20261123_020001', receipts=private)
+            restore.assert_not_called()
+            rotator.bounded_check_proof.assert_not_called()
+            self.assertEqual(list(unrelated.iterdir()), [])
 
     def test_private_invalid_receipt_can_read_valid_canonical_without_writing_it(self):
         with tempfile.TemporaryDirectory() as tmp:
