@@ -445,7 +445,7 @@ def preview_schedule(payload, *, formatted=False):
     return ('\n\n' if formatted else '\n').join(lines)
 
 
-def preserved_schedule(payload):
+def preserved_schedule(payload, *, iso_dates=False):
     from horarios_especiales.services.google_projection import approved_rules
 
     names = {row['branch_id']: row['branch_name'] for row in payload['locations']}
@@ -460,7 +460,8 @@ def preserved_schedule(payload):
                 winner = max((row for row in approved if rule_applies(row[1], day)),
                              key=lambda row: projection_rank(row, day), default=None)
                 hours = schedule_hours(winner[1]) if winner else 'Horario vigente'
-                lines.append(f'• {names[pk]} · {schedule_date(value, weekday=True)} · {hours}')
+                label = f'{value} ({WEEKDAYS[day.weekday()]})' if iso_dates else schedule_date(value, weekday=True)
+                lines.append(f'• {names[pk]} · {label} · {hours}')
     return lines
 
 
@@ -575,13 +576,12 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
         draft = telegram_reasoning.draft_for(config, row) if contextual else None
         if draft:
-            copied = telegram_reasoning.copied_schedule_change(text)
-            result = None if copied else telegram_reasoning.explicit_replacement(draft.request.canonical_payload, text)
-            if result is None and copied is None:
+            result = telegram_reasoning.explicit_replacement(draft.request.canonical_payload, text)
+            if result is None:
                 telegram_reasoning.queue(row, text, draft)
                 return
             try:
-                telegram_reasoning.apply_correction(row, config, actor, draft, {'text': text}, result, copied=copied)
+                telegram_reasoning.apply_correction(row, config, actor, draft, {'text': text}, result)
             except telegram_reasoning.CorrectionNeedsInterpretation:
                 telegram_reasoning.queue(row, text, draft)
                 return

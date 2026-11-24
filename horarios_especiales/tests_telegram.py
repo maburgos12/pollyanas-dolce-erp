@@ -262,28 +262,61 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         second = 'El único horario que se conserva de el túnel es el miércoles que es cerrado'
         with_date = ('Sucursal el túnel solo debe conservar miércoles 25 de nov 2026 como cerrado. '
                      'Los días 23 y 24 deben ajustas al nuevo horario')
-        SucursalAlias.objects.create(sucursal=tunnel, alias='Sucursal El Tunel')
-        copied_rows = (
-            '• Sucursal El Tunel · lunes 23 nov 2026 · 14:00–22:00\n'
-            '• Sucursal El Tunel · martes 24 nov 2026 · 14:00–22:00'
-        )
-        copied = copied_rows + '\nNo, esas también de modifican de **09:00–19:00**'
-        copied_with_heading = 'te falta modificar \nHorarios que se conservan\n' + copied_rows
-        followup = ('El Túnel sigue cerrado los miércoles y los días 23 y 24 de nov de 2026 '
-                    'deben corregirse con el nuevo horario')
-        for index, correction in enumerate((first, second, with_date, copied, copied_with_heading, followup)):
-            update_id = index * 2 + 1
-            client = FakeTelegram([self.update(notice, id=update_id), self.update(correction, id=update_id+1)])
+        for index, correction in ((1, first), (3, second), (5, with_date)):
+            client = FakeTelegram([self.update(notice, id=index), self.update(correction, id=index+1)])
             poll_once(self.config, client)
-            row = TelegramHoursUpdate.objects.get(update_id=update_id+1)
+            row = TelegramHoursUpdate.objects.get(update_id=index+1)
             self.assertEqual(row.state, 'PREVIEW', row.receipt)
             self.assertFalse(AgentTask.objects.filter(input_payload__kind='hours_draft_edit').exists())
             self.assertIn('miércoles 25 nov 2026 · Cerrado', row.receipt['text'])
             self.assertNotIn('14:00–22:00', row.receipt['text'])
             self.assertIn('23 nov 2026 al 24 nov 2026', row.receipt['text'])
             self.assertIsNone(row.request.approved_at)
+
+        quoted = (
+            '• EL TUNEL · lunes 23 nov 2026 · 14:00–22:00\n'
+            '• EL TUNEL · martes 24 nov 2026 · 14:00–22:00'
+        )
+        natural_edits = [
+            quoted + '\nNo, esas también de modifican de **09:00–19:00**',
+            'te falta modificar\nHorarios que se conservan\n' + quoted,
+            'El Túnel sigue cerrado los miércoles y los días 23 y 24 de nov de 2026 deben corregirse con el nuevo horario',
+            'Que el Túnel use la franja del aviso lunes y martes; respeten el descanso del miércoles.',
+        ]
+        for offset, correction in enumerate(natural_edits):
+            update_id = 7 + offset * 2
+            client = FakeTelegram([self.update(notice, id=update_id), self.update(correction, id=update_id+1)])
+            poll_once(self.config, client)
+            row = TelegramHoursUpdate.objects.get(update_id=update_id+1)
+            self.assertEqual(row.state, 'IA_WAIT', row.receipt)
+            job = local_router.claim('mac_ia_02')
+            self.assertEqual(job['data']['text'], correction)
+            self.assertIn('14:00–22:00', job['data']['draft'])
+            self.assertIn('2026-11-25', job['data']['draft'])
+            self.assertIn('· Cerrado', job['data']['draft'])
+            local_router.finish(job['id'], job['lease'], result={
+                'action': 'replace_draft_dates', 'branch': 'EL TUNEL', 'detail': '2026-11-23,2026-11-24',
+            })
+            poll_once(self.config, client)
+            row.refresh_from_db()
+            self.assertEqual(row.state, 'PREVIEW', row.receipt)
+            self.assertIn('23 nov 2026 al 24 nov 2026', row.receipt['text'])
+            self.assertNotIn('14:00–22:00', row.receipt['text'])
+            self.assertIn('miércoles 25 nov 2026 · Cerrado', row.receipt['text'])
+            self.assertIsNone(row.request.approved_at)
+
+        from horarios_especiales.services.telegram_reasoning import revise
+        draft = TelegramHoursUpdate.objects.get(update_id=update_id).request.canonical_payload
+        with self.assertRaisesRegex(ValueError, 'un cierre'):
+            revise(draft, job['data'], {
+                'action': 'replace_draft_dates', 'branch': 'EL TUNEL', 'detail': '2026-11-25',
+            })
+        with self.assertRaisesRegex(ValueError, 'no son excepciones'):
+            revise(draft, job['data'], {
+                'action': 'replace_draft_dates', 'branch': 'EL TUNEL', 'detail': '2026-12-01',
+            })
         self.assertEqual(resolve_approved_rule(tunnel, date(2026, 11, 23))['request_id'], prior.pk)
-        process_callback(self.callback(row, id=13), self.config, self.user)
+        process_callback(self.callback(row, id=15), self.config, self.user)
         row.request.refresh_from_db()
         self.assertEqual(row.request.approved_by, self.user)
         for day in (23, 24, 26, 27, 28, 29):

@@ -159,11 +159,12 @@ ningún teléfono, usuario real ni token forma parte de estos ejemplos o tests.
 
 Con la opción activa, una corrección breve usa únicamente el borrador vigente del
 mismo remitente. El botón anterior se pausa en cuanto llega la corrección.
-Qwen recibe la frase y un resumen de la propuesta por el router privado. Puede
-interpretar que se conserva un cierre semanal ya aprobado o que cambia una hora
-de apertura o cierre durante el periodo del borrador. El ERP valida las citas,
-sucursal, horas y reglas. Si falta un dato, conserva el borrador para otra
-aclaración. Sólo una vista previa validada emite un nuevo botón de aprobación.
+Qwen recibe la frase, los horarios propuestos y las excepciones vigentes por el
+router privado. Puede proponer qué fechas toman la franja del borrador, mantener
+un cierre semanal ya aprobado o cambiar una hora de apertura o cierre durante
+el periodo. El ERP valida sucursal, fechas, horas y reglas. Si falta un dato,
+conserva el borrador para otra aclaración. Sólo una vista previa validada emite
+un nuevo botón de aprobación.
 
 El contrato `hours_draft_edit` exige la identidad `telegram_hours`, usa Qwen 8B en
 Mac-IA-02 y sólo procesa una corrección viva vinculada a un mensaje en espera. No
@@ -176,13 +177,12 @@ hash, permisos 0600, sintaxis, probe y una inferencia sintética antes de activa
 `python manage.py configure_hours_reasoning enable`. Para pausar sólo la función
 de correcciones, ejecutar `python manage.py configure_hours_reasoning disable`.
 
-Para reemplazar horas puntuales ya aprobadas, la corrección debe identificar la
-sucursal y los días que se reemplazan con el horario del borrador, así como el
-día de cierre que se conserva. Por ejemplo, «Los 23 y 24 de El Túnel se
-reemplazan con el horario de la propuesta y el miércoles se mantiene cerrado».
-Las fechas sustituidas tienen la misma prioridad que un horario especial de un
-solo día. El botón de aprobación se vuelve a emitir para la propuesta completa.
-El cambio se limita al periodo y a la sucursal indicada.
+Cuando la persona pide usar el horario propuesto en fechas concretas, la IA
+devuelve la sucursal y una lista de fechas ISO. El ERP comprueba que cada fecha
+sea una excepción abierta del borrador. El horario nuevo se toma del borrador.
+Los cierres y las demás excepciones se conservan. Las fechas sustituidas adquieren
+la prioridad de un horario especial de un solo día y se confirma la propuesta
+completa con un botón nuevo.
 
 Si la IA termina dentro del plazo de la corrección, el bot puede recoger el
 resultado en la siguiente consulta mientras el borrador original siga vigente.

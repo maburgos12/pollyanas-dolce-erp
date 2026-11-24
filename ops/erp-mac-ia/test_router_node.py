@@ -64,6 +64,8 @@ class RouterNodeTests(unittest.TestCase):
         self.assertIn(data["text"], prompt)
         self.assertEqual(set(schema["required"]), {"action", "branch", "detail"})
         self.assertIn("replace_with_draft", schema["properties"]["action"]["enum"])
+        self.assertIn("replace_draft_dates", schema["properties"]["action"]["enum"])
+        self.assertIn("YYYY-MM-DD", prompt)
         self.assertFalse(schema["additionalProperties"])
         with self.assertRaises(ValueError):
             node.prepare({**job, "model": "qwen4b"})

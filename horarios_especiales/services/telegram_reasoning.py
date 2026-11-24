@@ -33,7 +33,6 @@ DATE_REFERENCE = re.compile(
     rf'(?P<day>\d{{1,2}})\s+(?:de\s+)?(?P<month>{MONTH_PATTERN})\b\.?'
     rf'(?:\s+(?:de\s+)?(?P<year>\d{{4}}))?|(?P<bare>\d{{1,2}}))\b'
 )
-TIME_RANGE = r'([0-2]\d:[0-5]\d)\s*[-–—]\s*([0-2]\d:[0-5]\d)'
 
 
 class CorrectionNeedsInterpretation(ValueError):
@@ -63,10 +62,15 @@ def hold(draft):
 
 
 def queue(row, text, draft):
-    from horarios_especiales.services.telegram_bot import preview_schedule
+    from horarios_especiales.services.telegram_bot import preserved_schedule, preview_schedule
 
     hold(draft)
-    data = {'text': text, 'draft': preview_schedule(draft.request.canonical_payload)}
+    payload = draft.request.canonical_payload
+    schedule = preview_schedule(payload)
+    exceptions = preserved_schedule(payload, iso_dates=True)
+    if exceptions:
+        schedule += '\nExcepciones que conserva el borrador:\n' + '\n'.join(exceptions)
+    data = {'text': text, 'draft': schedule}
     try:
         result = local_router.submit(agent=hours_intent.AGENT, kind=hours_intent.KIND, data=data,
             request_id=str(uuid5(NAMESPACE_URL, f'pollyanas-hours/{row.bot_id}/{row.update_id}')))
@@ -97,15 +101,14 @@ def explicit_time(span):
 
 
 def replacement_mode(source):
-    change = r'(?:reemplaz|sustitu|corrig|correg|ajust|modific|actualiz)\w*'
-    if re.search(rf'\b(?:no\s+(?:{change}|conserv\w*|mantien\w*)|confirmar|verificar|preguntar)\b', source):
+    if re.search(r'\b(?:no\s+(?:reemplaz\w*|sustitu\w*|conserv\w*|mantien\w*)|confirmar|verificar|preguntar)\b', source):
         return None
     if ((re.search(r'\b(?:solo|solamente|unic[oa])\b.{0,80}\b(?:conserv\w*|mantien\w*)\b', source))
             or (re.search(r'\bresto\b', source) and re.search(r'\b(?:conserv\w*|mantien\w*)\b', source))):
         return 'all'
-    if (re.search(rf'\b{change}\b', source)
+    if (re.search(r'\b(?:reemplaz\w*|sustitu\w*)\b', source)
             and re.search(r'\bnuevo horario\b|\bhorario (?:del borrador|propuesto|que se propone)\b', source)
-            and re.search(r'\b(?:conserv\w*|mantien\w*|sigue\s+cerrad[oa])\b', source)):
+            and re.search(r'\b(?:conserv\w*|mantien\w*)\b', source)):
         return 'dates'
     return None
 
@@ -216,94 +219,6 @@ def replace_dates(rule, source, weekday, approved):
     return updated
 
 
-def copied_schedule_change(text):
-    """Read preserved rows copied from Telegram and the instruction to change them."""
-    head, *quotes = text.strip().split('•')
-    use_proposed = re.fullmatch(
-        r'(?:(?:te\s+)?falta\s+modificar|(?:modifica|cambia)(?:\s+estas\s+fechas)?)'
-        r'(?:\s+horarios\s+que\s+se\s+conservan)?[:.]?',
-        normalize_text(head.replace('**', '')),
-    )
-    if (head.strip() and not use_proposed) or not quotes:
-        return None
-    rows = []
-    for quote in quotes:
-        parts = quote.strip().split('·', 2)
-        if len(parts) != 3:
-            return None
-        branch, date_label, hours = parts
-        match = re.fullmatch(TIME_RANGE + r'\s*(.*)', normalize_text(hours.replace('**', '')))
-        if not match:
-            return None
-        old_open, old_close, correction = match.groups()
-        if correction and len(rows) + 1 != len(quotes):
-            return None
-        rows.append((branch.strip(), normalize_text(date_label), {'open': old_open, 'close': old_close}))
-    new = re.fullmatch(
-        r'(?:no,\s*)?(?:(?:esas|esos|esas fechas|esos dias)\s+)?(?:tambien\s+)?'
-        r'(?:(?:se|de)\s+)?(?:modifican|cambian|ajustan)\s+(?:de|a)\s+' + TIME_RANGE + r'\.?',
-        correction,
-    )
-    if new:
-        return rows, {'open': new[1], 'close': new[2]}
-    if use_proposed and not correction:
-        return rows, None
-    return None
-
-
-def revise_copied_dates(payload, copied):
-    quotes, requested_window = copied
-    if validate_rule_payload(payload):
-        raise ValueError('El borrador perdió vigencia. Envía la instrucción completa.')
-    reference = date.fromisoformat(payload['rules'][0]['start_date'])
-    branches = set()
-    for branch_name, _, _ in quotes:
-        matches, errors = resolve_branch_token(branch_name, reference_date=reference)
-        if errors or len(matches) != 1 or matches[0].matched_by not in {'codigo_exacto', 'nombre_exacto', 'alias_exacto'}:
-            raise ValueError('Indica el nombre exacto de la sucursal.')
-        branches.add(matches[0].branch)
-    if len(branches) != 1:
-        raise ValueError('Copia las fechas de una sola sucursal por corrección.')
-    branch = branches.pop()
-    scoped = indexed_branch_rules(payload, branch.pk)
-    if len(scoped) != 1:
-        raise ValueError('La sucursal necesita una instrucción completa para este periodo.')
-    index, rule = scoped[0]
-    if (rule['kind'] != 'range' or 'branch_ids' not in rule or rule['closed_all_day']
-            or len(rule['time_windows']) != 1
-            or requested_window is not None and rule['time_windows'] != [requested_window]):
-        raise ValueError('El horario nuevo debe coincidir con el horario propuesto para la sucursal.')
-    start, end = (date.fromisoformat(rule[key]) for key in ('start_date', 'end_date'))
-    period = [start + timedelta(days=i) for i in range((end - start).days + 1)]
-    approved = approved_rules(branch.pk)
-    excluded = set(rule.get('excluded_dates', ()))
-    replaced = set()
-    for _, label, old_window in quotes:
-        dates, unlabelled, residual = calendar_references(label, period)
-        if len(dates) != 1 or unlabelled or residual.strip() or not dates <= excluded:
-            raise ValueError('Una de las fechas copiadas no figura entre los horarios que se conservan.')
-        day = date.fromisoformat(next(iter(dates)))
-        winner = max((row for row in approved if rule_applies(row[1], day)),
-                     key=lambda row: projection_rank(row, day), default=None)
-        if not winner or winner[1]['closed_all_day'] or winner[1]['time_windows'] != [old_window]:
-            raise ValueError('El horario copiado cambió. Revisa la vista previa vigente.')
-        replaced.update(dates)
-    changed = {**rule, 'excluded_dates': sorted(excluded - replaced),
-               'override_dates': sorted(set(rule.get('override_dates', ())) | replaced)}
-    return revised_branch(payload, index, branch, changed), f'{branch.nombre} toma el horario nuevo en las fechas copiadas.'
-
-
-def revised_branch(payload, index, branch, changed):
-    rules = list(payload['rules'])
-    targets = rules[index]['branch_ids']
-    if len(targets) > 1:
-        rules[index] = {**rules[index], 'branch_ids': [pk for pk in targets if pk != branch.pk]}
-        rules.insert(index + 1, {**changed, 'branch_ids': [branch.pk]})
-    else:
-        rules[index] = changed
-    return rules
-
-
 def revise(payload, data, result):
     hours_intent.validate_output(data, result)
     if validate_rule_payload(payload):
@@ -313,7 +228,7 @@ def revise(payload, data, result):
     if action == 'clarify':
         raise ValueError('Necesito una corrección específica.')
     replacement = explicit_replacement(payload, data['text'])
-    if replacement and action != 'replace_with_draft':
+    if replacement and action not in {'replace_with_draft', 'replace_draft_dates'}:
         raise ValueError('No pude comprobar la sustitución de fechas. El borrador sigue pendiente.')
     locations = {item['branch_id']: item for item in payload['locations']}
     all_ids = list(locations)
@@ -327,21 +242,43 @@ def revise(payload, data, result):
         raise ValueError('La sucursal necesita una instrucción completa para este periodo.')
     index, rule = scoped[0]
     rules = list(payload['rules'])
-    if action == 'replace_with_draft':
-        verified = replacement
-        detail = normalize_text(result['detail'])
-        labels = set(re.findall(rf'\b(?:{WEEKDAY_PATTERN})\b', detail))
-        weekday = next(iter(labels)) if len(labels) == 1 else None
-        if not verified or normalize_text(verified['detail']) != weekday:
-            raise ValueError('Indica una sola sucursal, las fechas que cambian y el día que se conserva.')
-        named, name_errors = resolve_branch_token(verified['branch'], reference_date=reference)
-        if name_errors or len(named) != 1 or named[0].branch.pk != branch.pk:
-            raise ValueError('La sucursal de la corrección no está confirmada.')
-        if weekday not in WEEKDAYS:
-            raise ValueError('Indica el día de semana que se conserva cerrado.')
-        changed = replace_dates(rule, source, weekday, approved_rules(branch.pk))
-        note = f'{branch.nombre} toma el horario nuevo en las fechas indicadas. Se conserva el cierre del {verified["detail"].lower()}.'
-        return all_ids, revised_branch(payload, index, branch, changed), note
+    if action in {'replace_with_draft', 'replace_draft_dates'}:
+        if action == 'replace_draft_dates':
+            selected = set(hours_intent.replacement_dates(result['detail']))
+            if (rule['kind'] != 'range' or 'branch_ids' not in rule or rule['closed_all_day']
+                    or not selected <= set(rule.get('excluded_dates', ()))):
+                raise ValueError('La IA indicó fechas que no son excepciones del borrador.')
+            approved = approved_rules(branch.pk)
+            for value in sorted(selected):
+                day = date.fromisoformat(value)
+                winner = max((row for row in approved if rule_applies(row[1], day)),
+                             key=lambda row: projection_rank(row, day), default=None)
+                if not winner or winner[1]['closed_all_day']:
+                    raise ValueError('La IA indicó un cierre que requiere una instrucción completa para cambiarse.')
+            changed = {**rule, 'excluded_dates': sorted(set(rule['excluded_dates']) - selected),
+                       'override_dates': sorted(set(rule.get('override_dates', ())) | selected)}
+            note = f'{branch.nombre} toma el horario propuesto en las fechas corregidas. Las demás excepciones se conservan.'
+        else:
+            verified = replacement
+            detail = normalize_text(result['detail'])
+            labels = set(re.findall(rf'\b(?:{WEEKDAY_PATTERN})\b', detail))
+            weekday = next(iter(labels)) if len(labels) == 1 else None
+            if not verified or normalize_text(verified['detail']) != weekday:
+                raise ValueError('Indica una sola sucursal, las fechas que cambian y el día que se conserva.')
+            named, name_errors = resolve_branch_token(verified['branch'], reference_date=reference)
+            if name_errors or len(named) != 1 or named[0].branch.pk != branch.pk:
+                raise ValueError('La sucursal de la corrección no está confirmada.')
+            if weekday not in WEEKDAYS:
+                raise ValueError('Indica el día de semana que se conserva cerrado.')
+            changed = replace_dates(rule, source, weekday, approved_rules(branch.pk))
+            note = f'{branch.nombre} toma el horario nuevo en las fechas indicadas. Se conserva el cierre del {verified["detail"].lower()}.'
+        targets = rule['branch_ids']
+        if len(targets) > 1:
+            rules[index] = {**rule, 'branch_ids': [pk for pk in targets if pk != branch.pk]}
+            rules.insert(index + 1, {**changed, 'branch_ids': [branch.pk]})
+        else:
+            rules[index] = changed
+        return all_ids, rules, note
     if action == 'keep_closed':
         weekday = normalize_text(result['detail'])
         if (weekday not in WEEKDAYS or rule['kind'] not in {'date', 'range'}
@@ -386,17 +323,12 @@ def revise(payload, data, result):
     return all_ids, rules, f'{branch.nombre} queda de {window["open"]} a {window["close"]} en este borrador.'
 
 
-def apply_correction(row, config, actor, draft, data, result, *, copied=None):
+def apply_correction(row, config, actor, draft, data, result):
     from horarios_especiales.services import telegram_bot as bot
     from horarios_especiales.services.requests import lock_branch_ids
 
     lock_branch_ids([item['branch_id'] for item in draft.request.canonical_payload['locations']])
-    payload = draft.request.canonical_payload
-    if copied:
-        rules, note = revise_copied_dates(payload, copied)
-        ids = [item['branch_id'] for item in payload['locations']]
-    else:
-        ids, rules, note = revise(payload, data, result)
+    ids, rules, note = revise(draft.request.canonical_payload, data, result)
     raw = draft.request.raw_command + '\n\nCorrección: ' + data['text']
     bot.build_preview(row, raw, config, actor, ids, rules, note=note, after=row.update_id)
 
