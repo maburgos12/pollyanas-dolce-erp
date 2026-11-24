@@ -154,3 +154,24 @@ inspección del grafo/contratos, y `count(*)` local acotado en auth_user, inbox,
 solicitudes y cursor: 0/0/0/0 antes de fixtures. Las pruebas usan identidades ficticias
 777/888. La equivalencia real queda documentada fuera del repo por el coordinador;
 ningún teléfono, usuario real ni token forma parte de estos ejemplos o tests.
+
+## Correcciones a un borrador mediante IA local
+
+Con la opción activa, una corrección breve usa únicamente el borrador vigente del
+mismo remitente. El botón anterior se pausa en cuanto llega la corrección.
+Qwen recibe la frase y un resumen de la propuesta por el router privado. Puede
+interpretar que se conserva un cierre semanal ya aprobado o que cambia una hora
+de apertura o cierre durante el periodo del borrador. El ERP valida las citas,
+sucursal, horas y reglas. Si falta un dato, conserva el borrador para otra
+aclaración. Sólo una vista previa validada emite un nuevo botón de aprobación.
+
+El contrato `hours_draft_edit` exige la identidad `telegram_hours`, usa Qwen 8B en
+Mac-IA-02 y sólo procesa una corrección viva vinculada a un mensaje en espera. No
+envía archivos, tokens ni audio al modelo de razonamiento. La corrección vence en
+cuatro minutos o al concluir la vigencia del borrador, lo que ocurra primero.
+
+Después del CI y del despliegue del ERP, publicar en Mac-IA-02 el archivo versionado
+`ops/erp-mac-ia/router_node.py` en la ruta existente del comando forzado. Verificar
+hash, permisos 0600, sintaxis, probe y una inferencia sintética antes de activar
+`python manage.py configure_hours_reasoning enable`. Para pausar sólo la función
+de correcciones, ejecutar `python manage.py configure_hours_reasoning disable`.

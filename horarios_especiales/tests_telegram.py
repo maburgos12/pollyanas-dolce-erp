@@ -125,6 +125,9 @@ class TelegramHoursTests(TestCase):
 
         for label, code in [('Sinaloa de Leyva', 'SINALOA_LEYVA'), ('Estación Bamoa', 'BAMOA')]:
             SucursalAlias.objects.create(alias=label, sucursal=self.branches[code])
+        matrix = self.branches['MATRIZ']
+        matrix.nombre = 'Matriz & <Anexo>'
+        matrix.save(update_fields=['nombre'])
         tunnel = self.branches['EL_TUNEL']
         prior, payload = create_request_from_rules(raw_text='Horario previo', actor=self.user,
             branch_ids=[tunnel.pk], rules=[
@@ -152,9 +155,14 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         self.assertEqual(row.state, 'PREVIEW', row.receipt)
         self.assertEqual(len(client.sent), 1)
         self.assertEqual(len(client.sent[0]['reply_markup']['inline_keyboard']), 1)
+        self.assertEqual(client.sent[0]['parse_mode'], 'HTML')
+        self.assertIn('<b>Horarios propuestos</b>', client.sent[0]['text'])
+        self.assertIn('Matriz &amp; &lt;Anexo&gt;', client.sent[0]['text'])
         self.assertIn('09:00–19:00', client.sent[0]['text'])
         self.assertIn('09:00–18:00', client.sent[0]['text'])
-        self.assertIn('2026-11-23, 2026-11-24, 2026-11-25', client.sent[0]['text'])
+        self.assertIn('23 nov 2026', client.sent[0]['text'])
+        self.assertIn('26 nov 2026 al 29 nov 2026\nEL TUNEL', client.sent[0]['text'])
+        self.assertIn('miércoles 25 nov 2026 · Cerrado', client.sent[0]['text'])
         self.assertIsNone(row.request.approved_at)
         callback = self.callback(row)
         process_callback(callback, self.config, self.user)
@@ -178,6 +186,85 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         checked = row.request.execution_summary_json['consumer_readback']['pairs']
         self.assertEqual(len(checked), 67)
         self.assertNotIn('EL_TUNEL:2026-11-25', checked)
+
+    def test_local_ai_keeps_wednesday_and_replaces_only_the_approval_button(self):
+        from django.core.management import call_command
+        from orquestacion.services import local_router
+
+        local_router.configure(enabled=True)
+        call_command('configure_hours_reasoning', 'enable')
+        tunnel = self.branches['EL_TUNEL']
+        SucursalAlias.objects.create(sucursal=tunnel, alias='Túnel')
+        prior, payload = create_request_from_rules(raw_text='Cierre semanal existente', actor=self.user,
+            branch_ids=[tunnel.pk], rules=[{'kind': 'weekly', 'start_date': '2026-11-22',
+                                           'weekdays': [2], 'closed_all_day': True, 'time_windows': []}])
+        approve_request(request_obj=prior, actor=self.user, expected_revision=payload['revision'])
+        client = FakeTelegram([self.update(
+            'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm del 23 al 29 de noviembre',
+        )])
+        poll_once(self.config, client)
+        old = TelegramHoursUpdate.objects.get(update_id=1)
+        self.assertEqual(old.state, 'PREVIEW')
+        nonce = old.nonce
+        correction = 'Túnel conserva cerrado días miércoles con el ajuste que ya tenía'
+        client.updates.append(self.update(correction, id=2))
+        poll_once(self.config, client)
+        new = TelegramHoursUpdate.objects.get(update_id=2)
+        self.assertEqual(new.state, 'IA_WAIT')
+        old.refresh_from_db()
+        self.assertEqual(old.nonce, '')
+        self.assertEqual(old.request.status, 'BORRADOR')
+        job = local_router.claim('mac_ia_02')
+        self.assertEqual(job['kind'], 'hours_draft_edit')
+        self.assertEqual(job['data']['text'], correction)
+        local_router.finish(job['id'], job['lease'], result={
+            'action': 'keep_closed', 'branch': 'Túnel', 'detail': 'miércoles',
+        })
+        poll_once(self.config, client)
+        new.refresh_from_db()
+        self.assertEqual(new.state, 'PREVIEW', new.receipt)
+        self.assertNotEqual(new.nonce, nonce)
+        self.assertIsNone(new.request.approved_at)
+        self.assertIn('miércoles 25 nov 2026 · Cerrado', new.receipt['text'])
+        self.assertIn('09:00–19:00', new.receipt['text'])
+        self.assertIn('09:00–18:00', new.receipt['text'])
+        old.refresh_from_db()
+        self.assertEqual(old.request.status, 'CANCELADO')
+        process_callback(self.callback(new, id=3), self.config, self.user)
+        new.request.refresh_from_db()
+        self.assertEqual(new.request.approved_by, self.user)
+
+    def test_local_ai_ambiguous_hour_pauses_button_but_keeps_draft_for_next_edit(self):
+        from django.core.management import call_command
+        from orquestacion.services import local_router
+
+        local_router.configure(enabled=True)
+        call_command('configure_hours_reasoning', 'enable')
+        client = FakeTelegram([self.update('BAMOA del 23 de noviembre al 29 de noviembre de 9 am a 6 pm')])
+        poll_once(self.config, client)
+        old = TelegramHoursUpdate.objects.get(update_id=1)
+        nonce = old.nonce
+        for index, text, detail in [(2, 'BAMOA mejor hasta las 7', '7'), (3, 'BAMOA hasta 5 pm', '5 pm')]:
+            client.updates.append(self.update(text, id=index))
+            poll_once(self.config, client)
+            job = local_router.claim('mac_ia_02')
+            local_router.finish(job['id'], job['lease'], result={
+                'action': 'change_close', 'branch': 'BAMOA', 'detail': detail,
+            })
+            poll_once(self.config, client)
+            attempted = TelegramHoursUpdate.objects.get(update_id=index)
+            if index == 2:
+                self.assertIsNone(attempted.request_id)
+                self.assertIn('Aclara la hora', attempted.receipt['text'])
+                old.refresh_from_db()
+                self.assertEqual(old.request.status, 'BORRADOR')
+                self.assertEqual(old.nonce, '')
+                self.assertNotIn('reply_markup', client.sent[-1])
+            else:
+                self.assertEqual(attempted.state, 'PREVIEW')
+                self.assertIsNone(attempted.request.approved_at)
+                self.assertNotEqual(attempted.nonce, nonce)
+                self.assertIn('09:00–17:00', attempted.receipt['text'])
 
     def test_notice_requests_clarification_for_ambiguous_or_unparsed_qualifiers(self):
         cases = (

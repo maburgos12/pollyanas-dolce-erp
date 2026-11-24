@@ -56,6 +56,19 @@ class RouterNodeTests(unittest.TestCase):
         self.assertEqual(schema["required"], ["estado"])
         self.assertFalse(schema["additionalProperties"])
 
+    def test_hours_contract_limits_model_input_and_output_shape(self):
+        node = module()
+        data = {"text": "Túnel sigue cerrado los miércoles", "draft": "Túnel: 09:00–19:00"}
+        job = {"kind": "hours_draft_edit", "model": "qwen8b", "data": data}
+        prompt, schema = node.prepare(job)
+        self.assertIn(data["text"], prompt)
+        self.assertEqual(set(schema["required"]), {"action", "branch", "detail"})
+        self.assertFalse(schema["additionalProperties"])
+        with self.assertRaises(ValueError):
+            node.prepare({**job, "model": "qwen4b"})
+        with self.assertRaises(ValueError):
+            node.prepare({**job, "data": {**data, "text": "á" * 401}})
+
     def test_error_response_contains_only_fixed_diagnostic_enums(self):
         import json
         node = module()
