@@ -13,7 +13,7 @@ from horarios_especiales.models import (
     SucursalPlataformaExterna,
 )
 from horarios_especiales.services.audit import log_special_hours_event
-from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, rule_applies, validate_rule_payload
+from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, projection_rank, rule_applies, validate_rule_payload
 from integraciones.services.google_business_profile.publisher import GoogleBusinessProfilePublisher, google_time, hours_equal
 
 DAYS = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
@@ -71,7 +71,7 @@ def projection_fields(*, current, rows, today, owned):
                       and not (row[1]["kind"] == "weekly" and not row[1].get("end_date")
                                and row[1]["start_date"] > today.isoformat())]
         if candidates:
-            winner = max(candidates, key=lambda row: row[0])
+            winner = max(candidates, key=lambda row: projection_rank(row, day))
             rule = winner[1]
             if rule["kind"] != "weekly" or rule.get("end_date"):
                 dated[day.isoformat()] = rule
@@ -139,7 +139,7 @@ def replacement_receipt(rows, request_id, today, covered_revisions):
         day = today + timedelta(days=offset)
         if not any(rule_applies(rule, day) for rule in own):
             continue
-        winner = max((row for row in rows if rule_applies(row[1], day)), key=lambda row: row[0])
+        winner = max((row for row in rows if rule_applies(row[1], day)), key=lambda row: projection_rank(row, day))
         if winner[0][2] != request_id:
             covered = any(row['request_id'] == request_id for row in covered_revisions)
             return 'PARTIALLY_SUPERSEDED' if covered else 'SUPERSEDED'

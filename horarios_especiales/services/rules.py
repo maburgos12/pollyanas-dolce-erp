@@ -21,7 +21,7 @@ def validate_rules(rules, *, branch_ids=None):
     covered = set()
     common_period = None
     for rule in rules:
-        if not isinstance(rule, dict) or set(rule) - {"kind", "start_date", "end_date", "weekdays", "closed_all_day", "time_windows", "branch_ids", "excluded_dates"}:
+        if not isinstance(rule, dict) or set(rule) - {"kind", "start_date", "end_date", "weekdays", "closed_all_day", "time_windows", "branch_ids", "excluded_dates", "override_dates"}:
             raise ValueError("Regla inválida o campos desconocidos.")
         kind = rule.get("kind")
         if not isinstance(kind, str) or kind not in PRECEDENCE:
@@ -58,6 +58,15 @@ def validate_rules(rules, *, branch_ids=None):
                     or len(set(excluded)) != len(excluded)):
                 raise ValueError('Las fechas conservadas deben estar dentro del periodo y dejar días aplicables.')
             for day in excluded:
+                date.fromisoformat(day)
+        if 'override_dates' in rule:
+            override = rule['override_dates']
+            if (not scoped or not isinstance(override, list) or not 1 <= len(override) <= 31
+                    or any(not isinstance(day, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day)
+                           or not start <= day <= end or day in rule.get('excluded_dates', ()) for day in override)
+                    or len(set(override)) != len(override)):
+                raise ValueError('Las fechas que se reemplazan deben estar dentro del periodo y ser distintas de las conservadas.')
+            for day in override:
                 date.fromisoformat(day)
         weekdays = rule.get("weekdays")
         if kind == "weekly":
@@ -105,6 +114,16 @@ def rule_applies(rule, target_date):
     return rule["kind"] == "range" or target_date.weekday() in rule["weekdays"]
 
 
+def rule_priority(rule, target_date):
+    if target_date.isoformat() in rule.get('override_dates', ()):
+        return PRECEDENCE["date"]
+    return PRECEDENCE[rule["kind"]]
+
+
+def projection_rank(row, target_date):
+    return (rule_priority(row[1], target_date), *row[0][1:])
+
+
 def resolve_approved_rule(branch, target_date):
     from horarios_especiales.models import SolicitudHorarioEspecial
 
@@ -130,7 +149,7 @@ def resolve_approved_rule(branch, target_date):
         if relevant > 100:
             return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
         for index, rule in applicable:
-            candidates.append(((PRECEDENCE[rule["kind"]], request.approved_at, request.id, index), request, rule))
+            candidates.append(((rule_priority(rule, target_date), request.approved_at, request.id, index), request, rule))
     if not candidates:
         return None
     _, request, rule = max(candidates, key=lambda candidate: candidate[0])
