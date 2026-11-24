@@ -131,3 +131,34 @@ class ConsumerReceiptsTests(TestCase):
             labels = consumer_receipts(obj)
         self.assertTrue(all('programado' in label for label in labels))
         self.assertNotIn('Finalizado',' '.join(labels))
+
+    def test_renewal_keeps_prior_confirmation_when_consumer_is_unavailable(self):
+        with patch('horarios_especiales.services.consumer_receipts.check_pair',
+                   return_value={dest: {'confirmed': True, 'checked_at': self.row['checked_at']}
+                                 for dest in ('store', 'maya')}):
+            self.assertIn('Finalizado', consumer_receipts(self.obj)[-1])
+        later = timezone.now() + timedelta(minutes=16)
+        with patch('horarios_especiales.services.consumer_receipts.check_pair',
+                   return_value={dest: {'confirmed': False} for dest in ('store', 'maya')}) as check, \
+             patch('horarios_especiales.services.consumer_receipts.timezone.now', return_value=later):
+            labels = consumer_receipts(self.obj)
+        check.assert_called_once()
+        self.assertTrue(all('confirmado anteriormente' in label for label in labels[:2]), labels)
+        self.assertNotIn('Finalizado', ' '.join(labels))
+        cache = self.obj.execution_summary_json['consumer_readback']['pairs']
+        self.assertTrue(all(item['confirmed'] for item in next(iter(cache.values())).values()))
+
+    def test_renewal_reports_new_mismatch_for_the_same_branch_and_date(self):
+        with patch('horarios_especiales.services.consumer_receipts.check_pair',
+                   return_value={dest: {'confirmed': True, 'checked_at': self.row['checked_at']}
+                                 for dest in ('store', 'maya')}):
+            consumer_receipts(self.obj)
+        later = timezone.now() + timedelta(minutes=16)
+        changed = {**self.row, 'revision': 'b' * 64, 'checked_at': later.isoformat()}
+        store = {'target_date': self.day.isoformat(), 'timezone': 'America/Mazatlan', 'branches': [changed]}
+        with patch('horarios_especiales.services.consumer_receipts.read_json', side_effect=[store, {}]), \
+             patch('horarios_especiales.services.consumer_receipts.timezone.now', return_value=later):
+            labels = consumer_receipts(self.obj)
+        self.assertIn('discrepancia', labels[0])
+        self.assertIn('confirmado anteriormente', labels[1])
+        self.assertNotIn('Finalizado', ' '.join(labels))
