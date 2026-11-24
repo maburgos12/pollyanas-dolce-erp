@@ -116,6 +116,7 @@ jobs:
           python -m unittest discover -s scripts/tests -p 'test_telegram*.py'
           bash scripts/test_deploy_web_safe.sh
           python -m unittest discover -s scripts/tests -p test_ci_test_shards.py
+          python -m unittest discover -s scripts/tests -p test_codebase_memory_compact.py
           python -m unittest discover -s scripts/tests -p test_task_factory.py
           python -m unittest discover -s scripts/tests -p test_mac_ia_worker.py
           python -m unittest discover -s ops/erp-mac-ia -p 'test_router*.py'
