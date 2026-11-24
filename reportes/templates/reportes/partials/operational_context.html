@@ -1,0 +1,24 @@
+<section class="bi-panel operational-context" id="contexto-comercial" aria-labelledby="contexto-comercial-title">
+  <div class="bi-section-head"><div>
+    <h2 id="contexto-comercial-title">Bitácora de contexto comercial</h2>
+    <p class="bi-subtle">Período de la bitácora: {{ operational_context_period }} · Contexto general de empresa, incluso al filtrar una sucursal.</p>
+  </div></div>
+  <p class="bi-copy">Declaraciones informativas. No modifican cifras, cobertura ni fechas de los paneles; no acreditan por sí solas cierres individuales, ventas en cero ni la proporción de una caída. El cierre comercial no acredita la hora de salida del personal.</p>
+  {% if operational_context_filter %}
+  <form method="get" action="#contexto-comercial">
+    {% for key, value in operational_context_params %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <label for="contexto-mes">Período de la bitácora (independiente de los paneles)</label>
+    <input id="contexto-mes" type="month" name="contexto_mes" value="{{ operational_context_period }}">
+    <button class="btn btn-secondary" type="submit">Consultar bitácora</button>
+  </form>
+  {% endif %}
+  {% if operational_context_error %}<p role="status">{{ operational_context_error }}</p>{% endif %}
+  {% for note in operational_contexts %}
+  <article class="bi-status-card">
+    <p class="bi-subtle">{{ note.fecha }} · {{ note.clave }} · {{ note.etiqueta }}</p>
+    <h3>{{ note.titulo }}</h3><p>{{ note.descripcion }}</p>
+    <strong>Fuentes documentales</strong>
+    <ul>{% for source in note.evidencia %}<li>{{ source }}</li>{% endfor %}</ul>
+  </article>
+  {% empty %}<p class="bi-subtle">Sin notas documentales en este período. Esto no acredita actividad ni ausencia de afectaciones.</p>{% endfor %}
+</section>

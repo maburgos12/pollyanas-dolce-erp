@@ -8,7 +8,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/commercial_analytics.css' %}?v=20261004-v2">
 <link rel="stylesheet" href="/static/css/sales_confidence.css?v=20261004-v1">
-<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20261124-contexto-v1">
 <link rel="stylesheet" href="{% static 'css/pollyana_dashboards.css' %}?v=20260525-dashboard-v2">
 {% endblock %}
 
@@ -29,6 +29,7 @@
     <p><a class="btn btn-secondary" href="?{{ bi_detail_query }}#detalle-operativo">Abrir operación, pronósticos y detalle de costos</a></p>
   {% endif %}
   {% include "reportes/partials/commercial_analytics.html" %}
+  {% include "reportes/partials/operational_context.html" with operational_contexts=commercial_analytics.operational_contexts operational_context_period=commercial_analytics.operational_context_period %}
   {% if bi_detail_loaded %}
   <details class="ca-legacy" id="detalle-operativo" open><summary>Operación, pronósticos y detalle de costos</summary>
   {% include "reportes/partials/sales_confidence.html" %}
