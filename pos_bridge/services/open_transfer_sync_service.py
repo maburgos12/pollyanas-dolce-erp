@@ -230,6 +230,7 @@ class OpenTransferSyncService:
         fecha: date | None = None,
         branch_filter: str | None = None,
         triggered_by=None,
+        refresh_received: bool = False,
     ) -> PointSyncJob:
         fecha = fecha or timezone.localdate()
         parameters = {
@@ -237,6 +238,8 @@ class OpenTransferSyncService:
             "fecha": fecha.isoformat(),
             "branch_filter": branch_filter or "",
         }
+        if refresh_received:
+            parameters["refresh_received"] = True
         sync_job = self.movement_service.create_job(
             job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
             triggered_by=triggered_by,
@@ -257,24 +260,32 @@ class OpenTransferSyncService:
                     end_date=fecha,
                     branch_filter=branch_filter,
                 )
+                received_lines = []
+                if refresh_received:
+                    received_lines = self.movement_service.transfer_extractor.extract(
+                        start_date=fecha, end_date=fecha, branch_filter=branch_filter,
+                        strict_dates=True,
+                    )
+            received_ids = {line.transfer_external_id for line in received_lines}
+            lines = [line for line in lines if line.transfer_external_id not in received_ids]
+            all_lines = [*lines, *received_lines]
             existing_hashes = set(
-                PointTransferLine.objects.filter(source_hash__in=[line.source_hash for line in lines]).values_list(
+                PointTransferLine.objects.filter(source_hash__in=[line.source_hash for line in all_lines]).values_list(
                     "source_hash",
                     flat=True,
                 )
             )
-            # Flujo de logística (carga inicial): sólo snapshot, igual que la
-            # recarga. Las líneas abiertas no están recibidas, así que esto no
-            # cambia lo que se escribe hoy; hace explícita la regla de negocio.
-            summary = self.movement_service.persist_transfer_lines(sync_job, lines, apply_inventory=False)
+            # Consultar también recibidas evita conservar como abierta una solicitud
+            # que Point ya retiró del listado abierto. Sólo actualizamos el espejo.
+            summary = self.movement_service.persist_transfer_lines(sync_job, all_lines, apply_inventory=False)
             transfer_ids = {line.transfer_external_id for line in lines if line.transfer_external_id}
             branch_ids = self._requesting_branch_ids(fecha=fecha, transfer_ids=transfer_ids, sync_job=sync_job)
             active_branch_ids = set(sucursales_operativas(fecha).values_list("id", flat=True))
             summary.update(
                 {
                     "folios_encontrados": len(transfer_ids),
-                    "lineas_nuevas": len([line for line in lines if line.source_hash not in existing_hashes]),
-                    "lineas_actualizadas": len([line for line in lines if line.source_hash in existing_hashes]),
+                    "lineas_nuevas": len([line for line in all_lines if line.source_hash not in existing_hashes]),
+                    "lineas_actualizadas": len([line for line in all_lines if line.source_hash in existing_hashes]),
                     "sucursales_con_solicitud": len(branch_ids),
                     "sucursales_sin_solicitud": max(0, len(active_branch_ids - branch_ids)),
                 }

@@ -890,8 +890,8 @@ def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> int | None:
         raise ValidationError("Esta ruta ya no está disponible para actualizar la carga.")
     if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
         recarga_id, ordenes = _tramo_carga_actual(ruta)
-        if recarga_id is None or not _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes):
-            raise ValidationError("La ruta no tiene un tramo abierto después de una recarga CEDIS.")
+        if not _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes):
+            raise ValidationError("La ruta no tiene paradas abiertas en el tramo actual.")
         return recarga_id
     if not ruta.paradas.filter(punto__sucursal__isnull=False).exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
         raise ValidationError("Esta ruta no tiene sucursales con carga de Point.")
@@ -914,7 +914,7 @@ def sincronizar_checklist_carga_desde_point(
     if ejecutar_sync:
         service = OpenTransferSyncService()
         for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
-            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
+            sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user, refresh_received=True)
             if sync_job.status != sync_job.STATUS_SUCCESS:
                 raise PointSyncUnavailableError(
                     "No se pudo sincronizar Point para generar la carga esperada.",
@@ -985,12 +985,16 @@ def _actualizar_checklist_carga_desde_point(
     checklist = checklist or obtener_checklist_carga(ruta)
     if solo_tramo_vigente and ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
         recarga_cedis_id, _ = _tramo_carga_actual(ruta)
-    if recarga_cedis_id is not None:
+    if recarga_cedis_id is not None or desde_repartidor or solo_tramo_vigente:
         paradas_tramo = _paradas_por_sucursal(ruta, ordenes_abiertas=_ordenes_tramo_carga_actual(ruta))
         creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(
             ruta=ruta, checklist=checklist, paradas_tramo=paradas_tramo,
         )
         # El snapshot global sigue siendo evidencia de la recarga CEDIS original.
+        if recarga_cedis_id is None and sync_job is not None:
+            checklist.point_sync_job = sync_job
+            checklist.sincronizado_en = timezone.now()
+            checklist.save(update_fields=["point_sync_job", "sincronizado_en", "actualizado_en"])
         if checklist.lineas.filter(
             parada_id__in={parada.pk for parada in paradas_tramo.values()},
             estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,

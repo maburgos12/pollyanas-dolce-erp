@@ -126,6 +126,7 @@ class PointTransferExtractor:
         branch_filter: str | None = None,
         received: bool,
         mode: str,
+        strict_dates: bool = False,
     ) -> list[ExtractedTransferLine]:
         auth_session = self.http_session_service.create()
         sucursal_param = self._resolve_branch_filter_value(auth_session.session, branch_filter)
@@ -160,6 +161,13 @@ class PointTransferExtractor:
         for transfer in transfers:
             transfer_id = str(transfer.get("PK_Transferencia") or "").strip()
             if not transfer_id:
+                continue
+            registered_at = self._parse_point_datetime(transfer.get("Fecha_registro"))
+            if strict_dates and (
+                registered_at is None
+                or (start_date is not None and registered_at.date() < start_date)
+                or (end_date is not None and registered_at.date() > end_date)
+            ):
                 continue
             detail_response = auth_session.session.get(
                 urljoin(self.settings.base_url.rstrip("/") + "/", self.DETAIL_PATH.lstrip("/")),
@@ -236,6 +244,7 @@ class PointTransferExtractor:
         start_date: date,
         end_date: date,
         branch_filter: str | None = None,
+        strict_dates: bool = False,
     ) -> list[ExtractedTransferLine]:
         return self._extract(
             start_date=start_date,
@@ -243,6 +252,7 @@ class PointTransferExtractor:
             branch_filter=branch_filter,
             received=True,
             mode="received",
+            strict_dates=strict_dates,
         )
 
     def extract_open(

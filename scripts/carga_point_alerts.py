@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect expired driver refreshes independently of the Celery workers."""
+"""Detect driver refresh failures independently of the Celery workers."""
 import json
 import os
 from pathlib import Path
@@ -14,7 +14,13 @@ def message(alerta):
     ruta_id = alerta["ruta_id"]
     folio = alerta["folio"] or ruta_id
     lines = [
-        "ERP Pollyana · actualización de carga Point vencida",
+        "ERP Pollyana · problema al actualizar carga Point",
+        {
+            "VENCIDA": "La solicitud venció sin completar.",
+            "ERROR": "La actualización terminó con un error.",
+            "SIN_CARGA": "Point respondió, pero el tramo quedó sin carga disponible.",
+            "PENDIENTE_ENVIO": "Point respondió con solicitudes pendientes de envío.",
+        }.get(alerta.get("estado", "VENCIDA"), "Revisar actualización de carga."),
         f"Ruta {folio} · Solicitud #{alerta['id']} · {tramo}",
         f"Solicitada {alerta['inicio']} (hora de Sinaloa).",
     ]
@@ -34,12 +40,17 @@ def deliver(alertas, path, sender):
         previous = {}
     if not isinstance(previous, dict):
         previous = {}
-    receipts = {str(item["id"]): previous[str(item["id"])] for item in alertas if str(item["id"]) in previous}
+    active_keys = {str(item.get("clave", item["id"])) for item in alertas}
+    receipts = {key: receipt for key, receipt in previous.items() if key in active_keys}
     accepted = {}
     for alerta in alertas:
         job_id = alerta["id"]
-        key = str(job_id)
+        key = str(alerta.get("clave", job_id))
         if key in receipts:
+            continue
+        if str(job_id) in previous:
+            receipts[key] = previous[str(job_id)]
+            save_receipts(path, receipts)
             continue
         receipt = sender(message(alerta))
         receipts[key] = receipt

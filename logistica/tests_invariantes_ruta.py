@@ -4664,7 +4664,44 @@ const context = {
 vm.createContext(context);
 vm.runInContext(source, context);
 const operation = process.argv[2];
-if (operation === "segment") {
+if (operation === "refresh-during-capture") {
+  void (async () => {
+    context.lastHtml = "";
+    vm.runInContext(`
+      state.pantallaActual = "ruta_carga";
+      state.perfil = {repartidor: {id: 12}};
+      state.rutaActiva = {
+        ruta: {id: 9, estatus: "EN_RUTA", repartidor: 12},
+        recarga_carga_point_id: null,
+        paradas: [{id: 2, punto: {tipo: "SUCURSAL", sucursal: 8}}]
+      };
+      state.cargaSucursal.paradaId = 2;
+      state.cargaSucursal.drafts = {15: {cantidad: "4", cantidadEditada: true, notas: "borrador"}};
+      render = (html) => { lastHtml = html; };
+      shell = (html) => html;
+      renderChecklistCarga = () => "";
+      loadRutaActiva = async () => state.rutaActiva;
+    `, context);
+    await vm.runInContext("renderRutaCarga('', state.rutaActiva)", context);
+    const visible = context.lastHtml.includes("onclick=\"actualizarCargaDesdePoint");
+    vm.runInContext(`
+      apiFetch = async () => {
+        state.cargaSucursal.drafts[15].cantidad = "7";
+        await renderRutaCarga("", state.rutaActiva);
+        return new Response(JSON.stringify({estado: "ACTUALIZADA"}), {status: 200});
+      };
+    `, context);
+    const button = {disabled: false};
+    context.testButton = button;
+    await vm.runInContext("actualizarCargaDesdePoint(9, 0, testButton)", context);
+    const result = vm.runInContext(`({
+      parada: state.cargaSucursal.paradaId,
+      draft: state.cargaSucursal.drafts[15],
+      actualizando: state.actualizandoCargaPoint
+    })`, context);
+    process.stdout.write(JSON.stringify({...result, visible, resultado: context.lastHtml.includes("Carga actualizada.")}));
+  })().catch((error) => { console.error(error); process.exitCode = 1; });
+} else if (operation === "segment") {
   const stops = [
     {orden: 1, punto: {tipo: "CEDIS"}, estado: "VISITADA", entrega_estado: "NO_APLICA", operativamente_resuelta: true, recarga_cedis_resuelta: true},
     {orden: 2, punto: {tipo: "SUCURSAL"}, estado: "PENDIENTE", entrega_estado: "PENDIENTE", operativamente_resuelta: true},
@@ -4888,6 +4925,14 @@ if (operation === "segment") {
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
+
+    def test_boton_point_permanece_en_captura_y_conserva_ediciones_durante_actualizacion(self):
+        result = json.loads(self.run_pwa_contract("refresh-during-capture"))
+        self.assertTrue(result["visible"])
+        self.assertTrue(result["resultado"])
+        self.assertEqual(result["parada"], 2)
+        self.assertEqual(result["draft"], {"cantidad": "7", "cantidadEditada": True, "notas": "borrador"})
+        self.assertFalse(result["actualizando"])
 
     def test_pwa_segmento_usa_resolucion_backend_y_no_remezcla_lineas_si_esta_vacio(self):
         result = json.loads(self.run_pwa_contract("segment"))
@@ -5265,8 +5310,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v97-carga-point-tramo-cedis")
-        self.assertIn("?v=route-control-v97-carga-point-tramo-cedis", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v98-carga-point-real")
+        self.assertIn("?v=route-control-v98-carga-point-real", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")

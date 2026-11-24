@@ -1,11 +1,14 @@
 from datetime import date, datetime
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, connection, transaction
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -26,7 +29,7 @@ from pos_bridge.services.open_transfer_sync_service import (
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceabilityService,
 )
-from pos_bridge.services.transfer_extractor import ExtractedTransferLine
+from pos_bridge.services.transfer_extractor import ExtractedTransferLine, PointTransferExtractor
 
 
 class OpenTransferSyncServiceTests(TestCase):
@@ -96,6 +99,42 @@ class OpenTransferSyncServiceTests(TestCase):
             is_finalized=True,
             is_open=True,
             source_hash=f"hash-{transfer_id}-{detail_id}",
+        )
+
+    def test_carga_reconcilia_recibida_ausente_del_listado_abierto(self):
+        _, _, snapshot, _ = self._persisted_snapshot()
+        stale = PointTransferLine.objects.get(pk=snapshot.members.get().source_line_id)
+        PointTransferLine.objects.filter(pk=stale.pk).update(sent_at=None)
+        received = self._line(transfer_id="T-1", detail_id="D-1", quantity="4")
+        received.is_open = False
+        received.is_received = True
+        received.received_at = received.sent_at
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_TRANSFERS)
+        movement = Mock()
+        movement.create_job.return_value = job
+        movement.transfer_extractor.extract_open.return_value = []
+        movement.transfer_extractor.extract.return_value = [received]
+
+        def persist(sync_job, lines, *, apply_inventory):
+            self.assertFalse(apply_inventory)
+            self.assertEqual(lines, [received])
+            PointTransferLine.objects.filter(pk=stale.pk).update(
+                sync_job=sync_job, sent_at=received.sent_at, received_at=received.received_at,
+                is_received=True, is_open=False,
+            )
+            return {"transfer_lines_seen": len(lines)}
+
+        movement.persist_transfer_lines.side_effect = persist
+        movement._mark_success.side_effect = lambda sync_job, summary: SimpleNamespace(result_summary=summary)
+        service = OpenTransferSyncService(movement_service=movement)
+        with patch.object(service, "_requesting_branch_ids", return_value=set()):
+            result = service.sync_open_transfers(fecha=date(2026, 8, 31), refresh_received=True)
+        stale.refresh_from_db()
+        self.assertTrue(stale.is_received)
+        self.assertIsNotNone(stale.sent_at)
+        self.assertEqual(result.result_summary[OPEN_TRANSFER_MANIFEST_KEY]["row_count"], 0)
+        movement.transfer_extractor.extract.assert_called_once_with(
+            start_date=date(2026, 8, 31), end_date=date(2026, 8, 31), branch_filter=None, strict_dates=True,
         )
 
     def test_manifest_hash_is_deterministic_and_order_independent(self):
@@ -346,3 +385,28 @@ class OpenTransferSyncServiceTests(TestCase):
                 operational_date=date(2026, 8, 31),
             ),
         )
+
+
+class TransferReceivedDateTests(SimpleTestCase):
+    def test_recibidas_de_otros_dias_no_piden_detalles_ni_entran_al_snapshot(self):
+        with TemporaryDirectory() as directory:
+            settings = SimpleNamespace(base_url="https://point.invalid", timeout_ms=1000, raw_exports_dir=Path(directory))
+            sessions = Mock()
+            session = sessions.create.return_value.session
+            session.get.side_effect = [
+                SimpleNamespace(raise_for_status=lambda: None, text=json.dumps([
+                    {"PK_Transferencia": 99, "Fecha_registro": "2026-08-29T09:00:00"},
+                    {"PK_Transferencia": 41769, "Fecha_registro": "2026-08-31T09:00:00",
+                     "Fecha_envio": "2026-08-31T10:00:00", "Fecha_recepcion": "2026-08-31T11:00:00",
+                     "fk_suc_provee": 1, "fk_suc_soli": 6, "isRecibido": True},
+                ])),
+                SimpleNamespace(raise_for_status=lambda: None, text=json.dumps([
+                    {"PK_Transf_Det": 1001, "Articulo": "Pastel", "Enviado": 4, "Recibido": 4},
+                ])),
+            ]
+            extractor = PointTransferExtractor(bridge_settings=settings, http_session_service=sessions)
+            lines = extractor.extract(start_date=date(2026, 8, 31), end_date=date(2026, 8, 31), strict_dates=True)
+            self.assertEqual([line.transfer_external_id for line in lines], ["41769"])
+            self.assertTrue(lines[0].is_received)
+            self.assertEqual(session.get.call_count, 2)
+            self.assertEqual(session.get.call_args.kwargs["params"]["idTransfer"], "41769")
