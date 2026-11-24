@@ -511,13 +511,7 @@
   <section class="card" id="carga-ruta">
     <div class="card-header">Carga esperada CEDIS por parada</div>
     {% include "logistica/partials/carga_point_estado.html" %}
-    <div class="point-reception-head">
-      <div class="point-reception-copy">
-        <p class="muted" style="margin:0;">
-          Fuente principal: solicitud de reabasto CEDIS. Point solo confirma salida o recepción cuando aplica.
-        </p>
-      </div>
-      {% if can_manage_logistica %}
+    {% if can_manage_logistica %}
       {% if ruta.estatus == "PLANEADA" or ruta.estatus == "EN_RUTA" %}
       <form method="post" data-async-action data-capture-snapshot="true" id="actualizar-carga-point" action="{% url 'logistica:ruta_detail' ruta.pk %}#carga-ruta">
         {% csrf_token %}
@@ -525,6 +519,15 @@
         <button class="btn btn-secondary" type="submit">Actualizar carga esperada</button>
       </form>
       {% endif %}
+    {% endif %}
+    <div id="carga-operacion-point">
+    <div class="point-reception-head">
+      <div class="point-reception-copy">
+        <p class="muted" style="margin:0;">
+          Fuente principal: solicitud de reabasto CEDIS. Point solo confirma salida o recepción cuando aplica.
+        </p>
+      </div>
+      {% if can_manage_logistica %}
       {% if ruta.estatus in "EN_RUTA COMPLETADA" %}
       <form method="post" data-route-loading-form data-loading-title="Actualizando recepción Point" data-loading-message="Comparando lo entregado contra recepción de sucursal...">
         {% csrf_token %}
@@ -684,6 +687,7 @@
           </tbody>
         </table>
       </div>
+    </div>
     </div>
     </div>
   </section>
@@ -982,7 +986,10 @@
       overlay.setAttribute("aria-hidden", "false");
     }
 
+    window.bindRouteLoading = function () {
     document.querySelectorAll("[data-route-loading-form]").forEach(function (form) {
+      if (form.dataset.routeLoadingBound) return;
+      form.dataset.routeLoadingBound = "true";
       form.querySelectorAll("[type=submit]").forEach(function (button) {
         button.addEventListener("click", function () {
           form._routeSubmitter = button;
@@ -993,6 +1000,9 @@
         showRouteLoading(form, form._routeSubmitter || form.querySelector("[type=submit]"));
       });
     });
+
+    };
+    window.bindRouteLoading();
 
     window.addEventListener("pageshow", function () {
       overlay.classList.remove("active");

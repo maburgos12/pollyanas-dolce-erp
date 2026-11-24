@@ -6,7 +6,7 @@
   let active = 0;
   let dirty = false;
   document.addEventListener("input", (event) => {
-    if (event.target.closest("#carga-datos-point form")) dirty = true;
+    if (event.target.closest("#carga-operacion-point form")) dirty = true;
   });
   const statusUrl = (id) => {
     const url = new URL(routeUrl);
@@ -53,13 +53,18 @@
         const view = await fetch(routeUrl, {cache: "no-store"});
         if (!view.ok) throw new Error("La consulta terminó; vuelve a abrir la ruta para ver los datos.");
         const parsed = new DOMParser().parseFromString(await view.text(), "text/html");
-        const fresh = parsed.getElementById("carga-datos-point");
+        const fresh = parsed.getElementById("carga-operacion-point");
         if (!fresh) throw new Error("La consulta terminó; revisa tu sesión antes de recargar.");
+        reload.hidden = false;
         if (dirty) {
           label.textContent += " Conservamos los campos que estás editando. Abre la carga actualizada cuando termines.";
           reload.hidden = false;
         } else {
-          document.getElementById("carga-datos-point").replaceWith(fresh);
+          const filter = document.getElementById("route-load-detail-search")?.value || "";
+          document.getElementById("carga-operacion-point").replaceWith(fresh);
+          const search = document.getElementById("route-load-detail-search");
+          if (search) search.value = filter;
+          window.bindRouteLoading?.();
           window.bindCargaPointFilter?.();
           window.ERPActionUI?.bind(document);
         }
