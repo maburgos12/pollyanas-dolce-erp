@@ -13,7 +13,7 @@ from horarios_especiales.models import (
     SucursalPlataformaExterna,
 )
 from horarios_especiales.services.audit import log_special_hours_event
-from horarios_especiales.services.rules import PRECEDENCE, rule_applies, validate_rule_payload
+from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, rule_applies, validate_rule_payload
 from integraciones.services.google_business_profile.publisher import GoogleBusinessProfilePublisher, google_time, hours_equal
 
 DAYS = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
@@ -48,7 +48,7 @@ def approved_rules(branch_id):
             action="APPROVED", payload_json__revision=payload.get("revision"),
         ).exists():
             raise ValueError("Revisión aprobada inválida; requiere revisión humana.")
-        for index, rule in enumerate(payload["rules"]):
+        for index, rule in indexed_branch_rules(payload, branch_id):
             rows.append(((PRECEDENCE[rule["kind"]], obj.approved_at, obj.pk, index), rule, payload["revision"]))
     return rows
 
@@ -104,6 +104,8 @@ def projection_fields(*, current, rows, today, owned):
             {"specialHours": {"specialHourPeriods": [expected]}},
         ) for expected in owned.get(key, []))
         if (weekly_target or finite_weekly) and key not in dated and not is_owned:
+            raise ValueError(f"MANUAL_EXCEPTION_CONFLICT: {key}")
+        if key in dated and 'branch_ids' in dated[key] and not is_owned:
             raise ValueError(f"MANUAL_EXCEPTION_CONFLICT: {key}")
         if finite_weekly and not is_owned:
             raise ValueError(f"MANUAL_EXCEPTION_CONFLICT: {key}")
@@ -233,7 +235,7 @@ def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
             future_pending = any(
                 (r["kind"] == "weekly" and not r.get("end_date") and r["start_date"] > today.isoformat())
                 or (r.get("end_date") or r["start_date"]) > end.isoformat()
-                for r in request_obj.canonical_payload["rules"])
+                for _, r in indexed_branch_rules(request_obj.canonical_payload, branch_id))
             receipt = "PROGRAMMED" if future_pending and projection_receipt == "GOOGLE_CONFIRMED" else projection_receipt
             if receipt == "GOOGLE_CONFIRMED":
                 receipt = replacement_receipt(rows, request_obj.pk, today, covered_revisions) or receipt
@@ -307,17 +309,18 @@ def preview_google_conflicts(request_obj):
             pending.append(location['branch_code'])
             continue
         rows = approved_rules(location['branch_id'])
+        local_rules = indexed_branch_rules(payload, location['branch_id'])
         rows.extend(((PRECEDENCE[rule['kind']], now, request_obj.pk, index), rule, payload['revision'])
-                    for index, rule in enumerate(payload['rules']))
+                    for index, rule in local_rules)
         inputs.append((location['branch_code'], config.external_location_name,
-                       config.settings_json.get('hours_agent_owned_specials', {}), rows))
+                       config.settings_json.get('hours_agent_owned_specials', {}), rows, local_rules))
 
     def read(item):
-        code, name, owned, rows = item
+        code, name, owned, rows, local_rules = item
         try:
             current = GoogleBusinessProfileClient(timeout_seconds=5).get_location(location_name=name)
             projection_fields(current=current, rows=rows, today=today, owned=owned)
-            for start in {r['start_date'] for r in payload['rules'] if r['kind'] == 'weekly' and r['start_date'] > today.isoformat()}:
+            for start in {r['start_date'] for _, r in local_rules if r['kind'] == 'weekly' and r['start_date'] > today.isoformat()}:
                 projection_fields(current=current, rows=rows, today=date.fromisoformat(start), owned=owned)
             return code, 'CHECKED'
         except ValueError as exc:

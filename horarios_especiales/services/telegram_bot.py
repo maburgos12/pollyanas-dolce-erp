@@ -21,8 +21,8 @@ from django.utils import timezone
 
 from horarios_especiales.models import SolicitudHorarioEspecial, TelegramHoursCursor, TelegramHoursUpdate
 from horarios_especiales.services.requests import approve_request, cancel_request, create_request_from_rules
-from horarios_especiales.services.rules import PRECEDENCE
-from horarios_especiales.services.telegram_parser import EXAMPLES, WEEKDAYS, parse_instruction
+from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, rule_applies
+from horarios_especiales.services.telegram_parser import EXAMPLES, WEEKDAYS, parse_grouped_instruction, parse_instruction
 
 
 class TelegramUnavailable(Exception):
@@ -283,22 +283,65 @@ def higher_priority_conflicts(branch_ids, rule):
     rows = SolicitudHorarioEspecial.objects.filter(approved_at__isnull=False, cancelled_at__isnull=True,
         status__in=['APROBADO', 'EJECUTADO', 'FALLIDO'])
     for obj in rows:
-        if obj.canonical_payload.get('schema_version') != 2:
-            if obj.details.filter(sucursal_id__in=branch_ids, target_date__gte=rule['start_date']).exists():
+        payload = obj.canonical_payload
+        if payload.get('schema_version') != 2:
+            details = obj.details.filter(sucursal_id__in=branch_ids, target_date__gte=rule['start_date'])
+            if rule.get('end_date'):
+                details = details.filter(target_date__lte=rule['end_date'])
+            if rule['kind'] == 'date':
+                details = details.filter(target_date=rule['start_date'])
+            if any(rule_applies(rule, day) for day in details.values_list('target_date', flat=True)):
                 conflicts.append(obj.request_code)
             continue
-        if not set(branch_ids).intersection(row['branch_id'] for row in obj.canonical_payload['locations']):
-            continue
-        for old in obj.canonical_payload['rules']:
-            if PRECEDENCE[old['kind']] <= PRECEDENCE[rule['kind']]:
-                continue
-            start = max(old['start_date'], rule['start_date'])
-            end = min(old.get('end_date') or old['start_date'], rule.get('end_date') or '9999-12-31')
-            if start <= end and (rule['kind'] != 'weekly' or any(
-                (date.fromisoformat(start) + timedelta(days=i)).weekday() in rule['weekdays']
-                for i in range(min(7, (date.fromisoformat(end) - date.fromisoformat(start)).days + 1)))):
-                conflicts.append(obj.request_code)
+        shared = set(branch_ids).intersection(row['branch_id'] for row in payload['locations'])
+        if any(PRECEDENCE[old['kind']] > PRECEDENCE[rule['kind']] and rules_overlap(old, rule)
+               for branch_id in shared for _, old in indexed_branch_rules(payload, branch_id)):
+            conflicts.append(obj.request_code)
     return sorted(set(conflicts))
+
+
+def retained_dates(branch_id, rule):
+    from horarios_especiales.services.google_projection import approved_rules
+
+    rows = approved_rules(branch_id)
+    start, end = (date.fromisoformat(rule[key]) for key in ('start_date', 'end_date'))
+    kept = []
+    for offset in range((end - start).days + 1):
+        day = start + timedelta(days=offset)
+        if not rule_applies(rule, day):
+            continue
+        winner = max((row for row in rows if rule_applies(row[1], day)), key=lambda row: row[0], default=None)
+        if winner and (winner[1]['kind'] == 'date' or winner[1]['closed_all_day']):
+            kept.append(day.isoformat())
+    return tuple(kept)
+
+
+def preserve_approved_days(rules):
+    result = []
+    for rule in rules:
+        groups = {}
+        for branch_id in rule['branch_ids']:
+            groups.setdefault(retained_dates(branch_id, rule), []).append(branch_id)
+        for kept, ids in groups.items():
+            scoped = {**rule, 'branch_ids': ids}
+            if kept:
+                days = (date.fromisoformat(rule['end_date']) - date.fromisoformat(rule['start_date'])).days + 1
+                if len(kept) == days:
+                    raise ValueError('Una sucursal tiene horarios aprobados durante todo el periodo. Usa otra vigencia o indica las fechas concretas que quieres cambiar.')
+                scoped['excluded_dates'] = list(kept)
+            result.append(scoped)
+    return result
+
+
+def request_conflicts(payload):
+    conflicts = set()
+    all_ids = [item['branch_id'] for item in payload['locations']]
+    for rule in payload['rules']:
+        ids = rule.get('branch_ids', all_ids)
+        conflicts.update(higher_priority_conflicts(ids, rule))
+        if 'branch_ids' in rule and any(retained_dates(branch_id, rule) for branch_id in ids):
+            raise ValueError('Hay nuevos días aprobados que deben conservarse. Pide otra vista previa.')
+    return sorted(conflicts)
 
 
 def rules_overlap(left, right):
@@ -308,26 +351,29 @@ def rules_overlap(left, right):
     finish = min(end(left), end(right))
     if start > finish:
         return False
-    from horarios_especiales.services.rules import rule_applies
+    limit = 31 if left.get('excluded_dates') or right.get('excluded_dates') else 7
     return any(rule_applies(left, start + timedelta(days=offset)) and rule_applies(right, start + timedelta(days=offset))
-               for offset in range(min(7, (finish - start).days + 1)))
+               for offset in range(min(limit, (finish - start).days + 1)))
 
 
 def approval_snapshot(obj):
     """Relevant approved rules, not projection receipts or unrelated branches/dates."""
-    ids = {row['branch_id'] for row in obj.canonical_payload['locations']}
+    target = obj.canonical_payload
+    ids = {row['branch_id'] for row in target['locations']}
     snapshot = []
     for old in SolicitudHorarioEspecial.objects.filter(approved_at__isnull=False, cancelled_at__isnull=True,
             status__in=['APROBADO', 'EJECUTADO', 'FALLIDO']).exclude(pk=obj.pk).order_by('pk'):
         payload = old.canonical_payload
         if payload.get('schema_version') == 2:
-            if not ids.intersection(row['branch_id'] for row in payload['locations']):
-                continue
-            old_rules = payload['rules']
+            shared = ids.intersection(row['branch_id'] for row in payload['locations'])
+            overlap = any(rules_overlap(new, prior) for branch_id in shared
+                          for _, new in indexed_branch_rules(target, branch_id)
+                          for _, prior in indexed_branch_rules(payload, branch_id))
         else:
-            old_rules = [{'kind': 'date', 'start_date': day.isoformat()} for day in
-                         old.details.filter(sucursal_id__in=ids).values_list('target_date', flat=True)]
-        if any(rules_overlap(new, prior) for new in obj.canonical_payload['rules'] for prior in old_rules):
+            overlap = any(rules_overlap(new, {'kind': 'date', 'start_date': day.isoformat()})
+                          for branch_id, day in old.details.filter(sucursal_id__in=ids).values_list('sucursal_id', 'target_date')
+                          for _, new in indexed_branch_rules(target, branch_id))
+        if overlap:
             snapshot.append({'id': old.pk, 'code': old.request_code, 'approved_at': old.approved_at.isoformat(),
                              'revision': hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()})
     return snapshot
@@ -335,8 +381,13 @@ def approval_snapshot(obj):
 
 def preview_text(obj):
     payload = obj.canonical_payload
-    lines = ['Vista previa · NO aplicada', 'Sucursales: ' + ', '.join(row['branch_code'] for row in payload['locations'])]
+    lines = ['Vista previa · NO aplicada']
+    locations = {row['branch_id']: row['branch_code'] for row in payload['locations']}
+    if not any('branch_ids' in rule for rule in payload['rules']):
+        lines.append('Sucursales: ' + ', '.join(locations.values()))
     for rule in payload['rules']:
+        if 'branch_ids' in rule:
+            lines.append('Sucursales: ' + ', '.join(locations[pk] for pk in rule['branch_ids']))
         dates = rule['start_date']
         if rule['kind'] == 'weekly':
             dates = ', '.join(WEEKDAYS[d] for d in rule['weekdays']) + ' desde ' + dates
@@ -346,6 +397,8 @@ def preview_text(obj):
             dates += ' sin fecha final'
         hours = 'CERRADO todo el día' if rule['closed_all_day'] else ', '.join(w['open'] + '–' + w['close'] for w in rule['time_windows'])
         lines.append(dates + ': ' + hours)
+        if rule.get('excluded_dates'):
+            lines.append('Se conserva el horario aprobado en: ' + ', '.join(rule['excluded_dates']) + '.')
     lines.extend(['Zona: America/Mazatlan.', 'Aprobar actualiza el horario central para Google, tienda y Maya. Cada destino se confirma con su propia lectura.',
                   obj.execution_summary_json.get('google_preflight', 'Google: comprobación previa pendiente.'),
                   'Vence en 20 minutos. Para corregir envía la instrucción completa.', 'Revisión: ' + payload['revision']])
@@ -390,17 +443,26 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
     # Invalidating first prevents old buttons from approving after an ambiguous correction.
     invalidate_pending(config, actor)
     try:
-        ids, rules = parse_instruction(text, row.payload['message']['date'], strict_branches=strict_branches)
-        conflicts = higher_priority_conflicts(ids, rules[0])
+        timestamp = row.payload['message']['date']
+        grouped = parse_grouped_instruction(text, timestamp)
+        if grouped:
+            from horarios_especiales.services.requests import lock_branch_ids
+            ids, rules = grouped
+            lock_branch_ids(ids)
+            rules = preserve_approved_days(rules)
+        else:
+            ids, rules = parse_instruction(text, timestamp, strict_branches=strict_branches)
+        conflicts = request_conflicts({'locations': [{'branch_id': pk} for pk in ids], 'rules': rules})
         if conflicts:
             raise ValueError('Hay excepciones de mayor prioridad: ' + ', '.join(conflicts) + '. Envía una instrucción con fecha exacta para cambiarlas.')
-        obj, payload = create_request_from_rules(raw_text=text, branch_ids=ids, rules=rules, actor=actor)
-        from horarios_especiales.services.google_projection import preview_google_conflicts
-        from horarios_especiales.services.requests import _lock_request_branches
-        _lock_request_branches(obj)
-        snapshot = approval_snapshot(obj)
-        obj.execution_summary_json['google_preflight'] = preview_google_conflicts(obj)
-        obj.save(update_fields=['execution_summary_json'])
+        with transaction.atomic():
+            obj, payload = create_request_from_rules(raw_text=text, branch_ids=ids, rules=rules, actor=actor)
+            from horarios_especiales.services.google_projection import preview_google_conflicts
+            from horarios_especiales.services.requests import _lock_request_branches
+            _lock_request_branches(obj)
+            snapshot = approval_snapshot(obj)
+            obj.execution_summary_json['google_preflight'] = preview_google_conflicts(obj)
+            obj.save(update_fields=['execution_summary_json'])
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
         row.receipt = {'text': 'No preparé una aprobación. ' + (str(exc) if isinstance(exc, ValueError) else EXAMPLES)}
         row.state = 'REPLY'
@@ -429,7 +491,7 @@ def process_callback(row, config, actor):
             _lock_request_branches(old.request)
             if old.receipt.get('approval_snapshot') != approval_snapshot(old.request):
                 raise ValueError('El horario aprobado cambió después de preparar la vista previa.')
-            if higher_priority_conflicts([item['branch_id'] for item in old.request.canonical_payload['locations']], old.request.canonical_payload['rules'][0]):
+            if request_conflicts(old.request.canonical_payload):
                 raise ValueError('La prioridad cambió después de preparar la vista.')
             from horarios_especiales.services.google_projection import preview_google_conflicts
             preview_google_conflicts(old.request)
@@ -463,7 +525,8 @@ def process_received(row, config, actor):
         prepare_text(row, text, config, actor)
         return
     if text in ('/start', '/help'):
-        reply = 'Agente privado de horarios. Revisa y aprueba cada vista previa antes de aplicar. /status /cancel\n' + EXAMPLES
+        reply = ('Agente privado de horarios. Revisa y aprueba cada vista previa antes de aplicar. /status /cancel\n'
+                 + EXAMPLES + '\nPara una excepción: Todas de 9 am a 7 pm excepto Bamoa de 9 am a 6 pm durante esta semana.')
     elif text == '/cancel':
         with transaction.atomic():
             invalidate_pending(config, actor)

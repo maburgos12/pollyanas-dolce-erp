@@ -14,11 +14,14 @@ def rule_revision(payload):
     return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
-def validate_rules(rules):
+def validate_rules(rules, *, branch_ids=None):
     if not isinstance(rules, list) or not 1 <= len(rules) <= 31:
         raise ValueError("Se requieren entre 1 y 31 reglas.")
+    scoped = any(isinstance(rule, dict) and 'branch_ids' in rule for rule in rules)
+    covered = set()
+    common_period = None
     for rule in rules:
-        if not isinstance(rule, dict) or set(rule) - {"kind", "start_date", "end_date", "weekdays", "closed_all_day", "time_windows"}:
+        if not isinstance(rule, dict) or set(rule) - {"kind", "start_date", "end_date", "weekdays", "closed_all_day", "time_windows", "branch_ids", "excluded_dates"}:
             raise ValueError("Regla inválida o campos desconocidos.")
         kind = rule.get("kind")
         if not isinstance(kind, str) or kind not in PRECEDENCE:
@@ -33,6 +36,29 @@ def validate_rules(rules):
         start, end = rule["start_date"], rule.get("end_date")
         if end and (end < start or (kind == "date" and end != start)):
             raise ValueError("Vigencia inválida.")
+        if scoped:
+            ids = rule.get('branch_ids')
+            if (not isinstance(ids, list) or not ids
+                    or any(type(pk) is not int or pk <= 0 for pk in ids)
+                    or len(set(ids)) != len(ids) or covered.intersection(ids)):
+                raise ValueError('Los grupos requieren sucursales únicas, sin cruces.')
+            covered.update(ids)
+            if kind != 'range' or (date.fromisoformat(end) - date.fromisoformat(start)).days >= 31:
+                raise ValueError('Cada grupo requiere un periodo de hasta 31 días.')
+            if common_period is None:
+                common_period = (start, end)
+            elif common_period != (start, end):
+                raise ValueError('Los grupos deben compartir el mismo periodo.')
+        if 'excluded_dates' in rule:
+            excluded = rule['excluded_dates']
+            duration = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 if scoped else 0
+            if (not scoped or not isinstance(excluded, list) or len(excluded) >= duration
+                    or any(not isinstance(day, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day)
+                           or not start <= day <= end for day in excluded)
+                    or len(set(excluded)) != len(excluded)):
+                raise ValueError('Las fechas conservadas deben estar dentro del periodo y dejar días aplicables.')
+            for day in excluded:
+                date.fromisoformat(day)
         weekdays = rule.get("weekdays")
         if kind == "weekly":
             if (not isinstance(weekdays, list) or not 1 <= len(weekdays) <= 7
@@ -45,17 +71,19 @@ def validate_rules(rules):
         from horarios_especiales.services.effective_hours import _windows
         if _windows(rule.get("time_windows"), rule.get("closed_all_day")) is None:
             raise ValueError("Rangos horarios inválidos o superpuestos.")
+    if scoped and branch_ids is not None and covered != set(branch_ids):
+        raise ValueError('Los grupos deben cubrir exactamente las sucursales de la solicitud.')
     return rules
 
 
 def validate_rule_payload(payload):
     try:
-        validate_rules(payload.get("rules"))
         locations = payload.get("locations")
         if (not isinstance(locations, list) or not 1 <= len(locations) <= 10
                 or any(not isinstance(row, dict) or type(row.get("branch_id")) is not int for row in locations)
                 or len({row["branch_id"] for row in locations}) != len(locations)):
             raise ValueError("Se requieren sucursales únicas identificadas por su ID ERP.")
+        validate_rules(payload.get("rules"), branch_ids=[row["branch_id"] for row in locations])
         if payload.get("revision") != rule_revision(payload):
             raise ValueError("La revisión no coincide con el contenido de la vista previa.")
     except (ValueError, TypeError, KeyError) as exc:
@@ -63,9 +91,14 @@ def validate_rule_payload(payload):
     return []
 
 
+def indexed_branch_rules(payload, branch_id):
+    return [(index, rule) for index, rule in enumerate(payload["rules"])
+            if "branch_ids" not in rule or branch_id in rule["branch_ids"]]
+
+
 def rule_applies(rule, target_date):
     target = target_date.isoformat()
-    if target < rule["start_date"] or (rule.get("end_date") and target > rule["end_date"]):
+    if target < rule["start_date"] or (rule.get("end_date") and target > rule["end_date"]) or target in rule.get("excluded_dates", ()):
         return False
     if rule["kind"] == "date":
         return target == rule["start_date"]
@@ -92,7 +125,7 @@ def resolve_approved_rule(branch, target_date):
             action="APPROVED", payload_json__revision=payload.get("revision"),
         ).exists():
             return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
-        applicable = [(index, rule) for index, rule in enumerate(payload["rules"]) if rule_applies(rule, target_date)]
+        applicable = [(index, rule) for index, rule in indexed_branch_rules(payload, branch.id) if rule_applies(rule, target_date)]
         relevant += bool(applicable)
         if relevant > 100:
             return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}

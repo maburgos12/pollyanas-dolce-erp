@@ -9,7 +9,7 @@ import requests
 from django.utils import timezone
 
 from horarios_especiales.models import SolicitudHorarioEspecial
-from horarios_especiales.services.rules import rule_applies, resolve_approved_rule
+from horarios_especiales.services.rules import indexed_branch_rules, rule_applies, resolve_approved_rule
 from core.models import Sucursal
 
 STORE_URL = 'https://www.pollyanasdolce.com/api/branch-hours'
@@ -93,8 +93,9 @@ def consumer_receipts(obj):
     superseded = False
     for location in payload['locations']:
         branch = Sucursal.objects.get(pk=location['branch_id'])
+        branch_rules = indexed_branch_rules(payload, branch.pk)
         for target in dates:
-            if not any(rule_applies(r, target) for r in rules):
+            if not any(rule_applies(r, target) for _, r in branch_rules):
                 continue
             effective = resolve_approved_rule(branch, target)
             if not effective or effective.get('revision') != payload['revision']:
