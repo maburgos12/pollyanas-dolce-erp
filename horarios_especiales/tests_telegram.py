@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from core.models import Sucursal
 from horarios_especiales.models import SolicitudHorarioEspecial, SucursalAlias, SucursalPlataformaExterna, TelegramHoursCursor, TelegramHoursUpdate
+from horarios_especiales.services.consumer_receipts import FINALIZED_LABEL
 from horarios_especiales.services.telegram_bot import (TelegramUnavailable, consumer_lock, persist_updates, poll_once,
     prepare_text, process_callback, recover_approved, status_text)
 from horarios_especiales.services.telegram_parser import parse_grouped_instruction, parse_instruction
@@ -93,6 +94,62 @@ class TelegramHoursTests(TestCase):
             poll_once(self.config, FakeTelegram())
             poll_once(self.config, FakeTelegram())
         self.assertFalse(TelegramHoursUpdate.objects.filter(pk__in=[row.pk for row in rows],state='QUEUED').exists())
+
+    def test_automatic_status_sends_one_silent_close_and_ignores_pending_flaps(self):
+        for uncertain in (False, True):
+            with self.subTest(uncertain_delivery=uncertain):
+                obj, payload = create_request_from_rules(raw_text='fixture', actor=self.user,
+                    branch_ids=[self.branches['BAMOA'].pk], rules=[{'kind': 'date',
+                    'start_date': timezone.localdate().isoformat(), 'closed_all_day': True, 'time_windows': []}])
+                approve_request(request_obj=obj, actor=self.user, expected_revision=payload['revision'])
+                row = TelegramHoursUpdate.objects.create(bot_id=12345, update_id=200 + uncertain,
+                    telegram_user_id=777, chat_id=777, request=obj, state='QUEUED')
+                client = FakeTelegram()
+                statuses = [
+                    'Google BAMOA: pendiente\nTienda: pendiente de verificación.',
+                    'Google BAMOA: pendiente\nTienda: confirmado por lectura.',
+                    'Google BAMOA: pendiente\nTienda: pendiente de verificación.',
+                    f'{obj.request_code}\n{FINALIZED_LABEL}',
+                ]
+                with patch('horarios_especiales.services.telegram_bot.status_text', side_effect=statuses) as status:
+                    for _ in range(3):
+                        poll_once(self.config, client)
+                    self.assertEqual(client.sent, [])
+                    row.refresh_from_db()
+                    self.assertEqual(row.state, 'QUEUED')
+                    if uncertain:
+                        client.fail_send = True
+                        with self.assertRaises(TelegramUnavailable):
+                            poll_once(self.config, client)
+                        client.fail_send = False
+                    else:
+                        poll_once(self.config, client)
+                        self.assertEqual(len(client.sent), 1)
+                        self.assertTrue(client.sent[0]['disable_notification'])
+                        self.assertIn(FINALIZED_LABEL, client.sent[0]['text'])
+                    poll_once(self.config, client)
+                    self.assertEqual(len(client.sent), 0 if uncertain else 1)
+                    self.assertEqual(status.call_count, 4)
+                row.refresh_from_db()
+                self.assertEqual(row.state, 'DONE')
+                self.assertIn('terminal_notice_attempted_at', row.receipt)
+                self.assertIsNotNone(row.request.approved_at)
+
+    def test_previously_reported_final_status_retires_legacy_tracking(self):
+        obj, payload = create_request_from_rules(raw_text='fixture', actor=self.user,
+            branch_ids=[self.branches['BAMOA'].pk], rules=[{'kind': 'date',
+            'start_date': timezone.localdate().isoformat(), 'closed_all_day': True, 'time_windows': []}])
+        approve_request(request_obj=obj, actor=self.user, expected_revision=payload['revision'])
+        row = TelegramHoursUpdate.objects.create(bot_id=12345, update_id=203,
+            telegram_user_id=777, chat_id=777, request=obj, state='QUEUED',
+            receipt={'last_status': f'{obj.request_code}\n{FINALIZED_LABEL}'})
+        client = FakeTelegram()
+        with patch('horarios_especiales.services.telegram_bot.status_text') as status:
+            poll_once(self.config, client)
+            status.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(row.state, 'DONE')
+        self.assertEqual(client.sent, [])
 
     def test_parser_relative_date_frozen_in_mazatlan_and_all_ten(self):
         ids, rules = parse_instruction('Todas hoy cerradas', STAMP)
