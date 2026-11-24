@@ -8,6 +8,7 @@ import stat
 import time
 from contextlib import contextmanager
 from datetime import date, timedelta
+from html import escape
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -420,7 +421,7 @@ def proposed_period(rule):
                      for start, end in spans)
 
 
-def preview_schedule(payload):
+def preview_schedule(payload, *, formatted=False):
     names = {row['branch_id']: row['branch_name'] for row in payload['locations']}
     groups = {}
     for rule in payload['rules']:
@@ -430,8 +431,12 @@ def preview_schedule(payload):
     lines = [next(iter(periods))] if len(periods) == 1 else []
     for (period, hours), branches in groups.items():
         when = f' · {period}' if len(periods) > 1 else ''
-        lines.append(f'• {hours}{when} · ' + ', '.join(branches))
-    return '\n'.join(lines)
+        names_text = ', '.join(branches)
+        if formatted:
+            lines.append(f'<b>{escape(hours)}</b>{escape(when)}\n{escape(names_text)}')
+        else:
+            lines.append(f'• {hours}{when} · {names_text}')
+    return ('\n\n' if formatted else '\n').join(lines)
 
 
 def preserved_schedule(payload):
@@ -455,15 +460,19 @@ def preserved_schedule(payload):
 
 def preview_text(obj):
     summary = obj.execution_summary_json
-    parts = ['Vista previa de horarios · NO aplicada', preview_schedule(obj.canonical_payload)]
+    parts = [
+        '<b>Vista previa de horarios</b> · NO aplicada',
+        '<b>Horarios propuestos</b>\n' + preview_schedule(obj.canonical_payload, formatted=True),
+    ]
     preserved = summary.get('preserved', [])
     if preserved:
-        parts.append('Horarios que se conservan\n' + '\n'.join(preserved))
+        parts.append('<b>Horarios que se conservan</b>\n' + '\n'.join(escape(line) for line in preserved))
     if summary.get('correction'):
-        parts.append(summary['correction'])
-    parts.append('Revisa el periodo y las sucursales. Pulsa Aprobar para iniciar la actualización en Google, tienda y Maya.')
-    parts.append(summary.get('google_preflight', 'Google: comprobación previa pendiente.'))
-    parts.append('Vigencia del botón: 20 minutos. Para corregir, responde con el cambio.')
+        parts.append(escape(summary['correction']))
+    parts.append('<b>Google</b> · ' + escape(summary.get(
+        'google_preflight', 'Comprobación previa pendiente.').removeprefix('Google: ')))
+    parts.append('Pulsa <b>Aprobar</b> para iniciar la actualización en Google, tienda y Maya. '
+                 'El botón vence en 20 minutos. Puedes responder con una corrección.')
     return '\n\n'.join(parts)
 
 
@@ -484,6 +493,11 @@ def status_text(obj):
     if not details:
         lines.append('Google: pendiente, sin recibo de publicación.')
     return '\n'.join(lines + consumer_receipts(obj))
+
+
+def formatted_status(text):
+    first, _, tail = text.partition('\n')
+    return f'<b>{escape(first)}</b>' + ('\n\n' + escape(tail) if tail else '')
 
 
 def invalidate_pending(config, actor, *, before=None, preserve_draft=False):
@@ -527,11 +541,12 @@ def build_preview(row, text, config, actor, ids, rules, *, note='', after=None):
     row.revision = payload['revision']
     row.nonce = secrets.token_hex(16)
     row.expires_at = timezone.now() + timedelta(minutes=20)
-    warning = ('\n\nPuede reemplazar horarios aprobados: ' + ', '.join(item['code'] for item in snapshot) + '. Revisa antes de aprobar.') if snapshot else ''
+    warning = ('\n\n<b>Revisa antes de aprobar</b>\nPuede reemplazar horarios aprobados: '
+               + ', '.join(escape(item['code']) for item in snapshot) + '.') if snapshot else ''
     preview = preview_text(obj) + warning
     if len(preview.encode('utf-16-le')) // 2 > 3800:
         raise ValueError('La vista previa completa no cabe en un mensaje. Envía un periodo más corto.')
-    row.receipt = {'text': preview, 'approval_snapshot': snapshot}
+    row.receipt = {'text': preview, 'parse_mode': 'HTML', 'approval_snapshot': snapshot}
     row.state = 'PREPARED'
 
 
@@ -617,6 +632,7 @@ def process_received(row, config, actor):
     if text and not text.startswith('/'):
         prepare_text(row, text, config, actor)
         return
+    parse_mode = None
     if text in ('/start', '/help'):
         reply = ('Agente privado de horarios. Revisa y aprueba cada vista previa antes de aplicar. /status /cancel\n'
                  + EXAMPLES + '\nPara una excepción: Todas de 9 am a 7 pm excepto Bamoa de 9 am a 6 pm durante esta semana.')
@@ -626,7 +642,8 @@ def process_received(row, config, actor):
         reply = 'Vistas previas pendientes canceladas. Las solicitudes aprobadas se conservan; para cambiarlas envía una nueva instrucción.'
     elif text == '/status':
         last = owner_updates(config).filter(request__isnull=False).order_by('-pk').first()
-        reply = status_text(last.request) if last else 'Sin solicitudes todavía.'
+        reply = formatted_status(status_text(last.request)) if last else 'Sin solicitudes todavía.'
+        parse_mode = 'HTML' if last else None
     elif message.get('voice') or message.get('audio'):
         from horarios_especiales.services.telegram_audio import queue
         queue(row, config)
@@ -634,6 +651,8 @@ def process_received(row, config, actor):
     else:
         reply = EXAMPLES
     row.state, row.receipt = 'REPLY', {'text': reply}
+    if parse_mode:
+        row.receipt['parse_mode'] = parse_mode
     row.save(update_fields=['state', 'receipt'])
 
 
@@ -643,6 +662,8 @@ def deliver(row, client, config):
     if row.telegram_user_id != config['telegram_user_id'] or row.chat_id != config['telegram_chat_id'] or row.bot_id != config['bot_id']:
         raise PermissionDenied('El propietario Telegram cambió.')
     payload = {'chat_id': row.chat_id, 'text': row.receipt['text']}
+    if row.receipt.get('parse_mode') == 'HTML':
+        payload['parse_mode'] = 'HTML'
     if row.state == 'PREPARED':
         payload['reply_markup'] = {'inline_keyboard': [[{'text': 'Aprobar esta revisión', 'callback_data': f'approve:{row.pk}:{row.nonce}'}]]}
     result = client.call('sendMessage', **payload)
@@ -717,7 +738,7 @@ def poll_once(config=None, client=None):
             text = status_text(row.request)
             if row.receipt.get('last_status') != text:
                 actor_for(scoped)
-                client.call('sendMessage', chat_id=row.chat_id, text=text)
+                client.call('sendMessage', chat_id=row.chat_id, text=formatted_status(text), parse_mode='HTML')
                 row.receipt['last_status'] = text
                 row.save(update_fields=['receipt'])
             rules = row.request.canonical_payload.get('rules', [])

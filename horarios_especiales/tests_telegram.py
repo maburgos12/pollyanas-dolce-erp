@@ -125,6 +125,9 @@ class TelegramHoursTests(TestCase):
 
         for label, code in [('Sinaloa de Leyva', 'SINALOA_LEYVA'), ('Estación Bamoa', 'BAMOA')]:
             SucursalAlias.objects.create(alias=label, sucursal=self.branches[code])
+        matrix = self.branches['MATRIZ']
+        matrix.nombre = 'Matriz & <Anexo>'
+        matrix.save(update_fields=['nombre'])
         tunnel = self.branches['EL_TUNEL']
         prior, payload = create_request_from_rules(raw_text='Horario previo', actor=self.user,
             branch_ids=[tunnel.pk], rules=[
@@ -152,10 +155,13 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         self.assertEqual(row.state, 'PREVIEW', row.receipt)
         self.assertEqual(len(client.sent), 1)
         self.assertEqual(len(client.sent[0]['reply_markup']['inline_keyboard']), 1)
+        self.assertEqual(client.sent[0]['parse_mode'], 'HTML')
+        self.assertIn('<b>Horarios propuestos</b>', client.sent[0]['text'])
+        self.assertIn('Matriz &amp; &lt;Anexo&gt;', client.sent[0]['text'])
         self.assertIn('09:00–19:00', client.sent[0]['text'])
         self.assertIn('09:00–18:00', client.sent[0]['text'])
         self.assertIn('23 nov 2026', client.sent[0]['text'])
-        self.assertIn('26 nov 2026 al 29 nov 2026 · EL TUNEL', client.sent[0]['text'])
+        self.assertIn('26 nov 2026 al 29 nov 2026\nEL TUNEL', client.sent[0]['text'])
         self.assertIn('miércoles 25 nov 2026 · Cerrado', client.sent[0]['text'])
         self.assertIsNone(row.request.approved_at)
         callback = self.callback(row)

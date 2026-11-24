@@ -11,6 +11,7 @@ import subprocess
 import time
 import wave
 from datetime import timedelta
+from html import escape
 from pathlib import Path
 
 import requests
@@ -139,7 +140,12 @@ def prepare_result(row, text, config, source):
     audit = {key: value for key, value in row.receipt.items() if key in ('reserved_cents', 'sha256')}
     bot.prepare_text(row, normalize_spoken(text.strip()), config, actor, strict_branches=True)
     row.receipt.update(audit, source=source)
-    row.receipt['text'] = 'Escuché: ' + text.strip() + '\n\n' + row.receipt['text']
+    if row.receipt.get('parse_mode') == 'HTML':
+        proposed = '<b>Escuché</b>\n' + escape(text.strip()) + '\n\n' + row.receipt['text']
+        if len(proposed.encode('utf-16-le')) // 2 <= 3800:
+            row.receipt['text'] = proposed
+    else:
+        row.receipt['text'] = 'Escuché: ' + text.strip() + '\n\n' + row.receipt['text']
     row.save(update_fields=['receipt'])
 
 

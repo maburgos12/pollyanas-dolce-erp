@@ -61,7 +61,8 @@ class AudioTests(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.state, 'PREPARED')
         self.assertIsNone(row.request.approved_at)
-        self.assertIn('Escuché: Todas hoy cerradas', row.receipt['text'])
+        self.assertEqual(row.receipt['parse_mode'], 'HTML')
+        self.assertIn('<b>Escuché</b>\nTodas hoy cerradas', row.receipt['text'])
         self.assertNotIn('pcm', row.receipt)
         self.assertFalse(audio.finish(self.config, {'id':row.pk, 'lease':job['lease'], 'sha256':job['sha256'], 'text':'Todas hoy cerradas'})['accepted'])
 
