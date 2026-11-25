@@ -44,8 +44,8 @@ instalada, no sólo con la lectura del TOML.
 Para revertir, restituir `command` y `args` del servidor desde el respaldo que
 nombra el recibo. Restaurar el archivo completo sólo si su hash actual coincide
 con `config_after_sha256` del recibo; de otro modo preservar los cambios de otras
-tareas y restaurar únicamente esos dos campos. No borrar índices ni el binario
-original. Las actualizaciones del instalador nativo pueden reescribir su entrada;
+tareas y restaurar únicamente esos dos campos. La reversión no requiere borrar
+índices ni el binario original. Las actualizaciones del instalador nativo pueden reescribir su entrada;
 revisar de nuevo con el instalador local, sin reinstalar por rutina.
 
 ## Verificación y ahorro
@@ -162,6 +162,15 @@ arriba también sirve para volver al binario original. Abrir una conexión nueva
 antes de comprobarlo: cambiar la configuración no sustituye procesos abiertos.
 Reconstruir el índice afectado con el binario corregido; los índices anteriores
 no recuperan las aristas faltantes por cambiar solamente el ejecutable.
+
+En 0.8.1, incluso `index_repository(mode="full")` puede reutilizar archivos sin
+cambios. Para migrar un índice anterior, respaldar primero su base derivada con
+la API de backup de SQLite y verificar integridad y conteos. Comprobar si contiene
+ADR, resúmenes o trazas que deban conservarse. Regenerar únicamente el proyecto
+identificado mediante `delete_project` e `index_repository` desde una conexión
+con el binario corregido; no borrar cachés de otros proyectos. Cotejar después
+las identidades de los consumidores. Esto afecta al índice MCP, nunca a la base
+operativa PostgreSQL del ERP.
 
 Se repitieron las 18 llamadas sobre la misma copia estática del ERP
 `b6c3e354f34c060b946710c28444ece2574ed6a1`, sin normalizar imports:
