@@ -66,7 +66,7 @@ código completo frente a `response_detail="full"`. No es una medición del gast
 total de Codex. Es menor que la proyección experimental de 29%, porque esta
 implementación conserva también métricas y otros metadatos útiles.
 
-## Dependencias de costeo: diagnóstico separado
+## Dependencias de costeo: diagnóstico original (24/nov/2026)
 
 En `codebase-memory-mcp 0.8.1`, el grafo devuelve cuatro de nueve consumidores
 explícitos de `rentabilidad.services_costos.asignar_costos_filas`. Los cinco
@@ -107,3 +107,72 @@ ambas rutas, usando una fixture suficientemente grande para activar la paralela.
 Después reconstruir un índice aislado y cotejar los nueve consumidores con la
 fuente. No cambiar globalmente a modo secuencial ni actualizar todos los índices
 sin comprobar la cobertura de los demás lenguajes.
+
+## Corrección nativa local (25/nov/2026)
+
+El parche `scripts/patches/codebase-memory-mcp-0.8.1-python-relative.patch`
+se aplica exclusivamente al commit upstream
+`f0c9be19c5d74b84f418d807bfdce7b5d6a261ff` (v0.8.1).
+Su procedencia y SHA256 están en el JSON contiguo. Es una compilación local,
+no un release publicado por el proveedor. No cambia los imports del ERP.
+
+- Canonicaliza los imports relativos antes de emitir resoluciones LSP.
+- Evita añadir un punto adicional en `from . import nombre`, incluyendo alias.
+- La ruta secuencial conserva la protección de la paralela: un destino LSP
+  externo o sin indexar no cae en una función local sólo por llamarse igual.
+- Añade regresiones C para import hermano, padre, `__init__` y límite del proyecto.
+  No modifica las herramientas MCP ni el filtro compacto. El soporte general
+  de alias de funciones Python sigue siendo una limitación separada.
+
+Para reproducir, usar una copia limpia del proveedor en ese commit, verificar
+el hash del parche contra el manifiesto y ejecutar desde esa copia:
+
+```sh
+git apply --check /RUTA_ERP/scripts/patches/codebase-memory-mcp-0.8.1-python-relative.patch
+git apply /RUTA_ERP/scripts/patches/codebase-memory-mcp-0.8.1-python-relative.patch
+bash scripts/test.sh
+bash scripts/build.sh --version 0.8.1-pollyana-relative1
+```
+
+La compilación usa las dependencias incluidas por el proveedor. Conservar su
+licencia MIT. No ejecutar sus comandos de instalación/actualización global.
+Probar el binario resultante desde el worktree del ERP con:
+
+```sh
+python3 scripts/verify_codebase_memory_indexer.py --binary /RUTA_PROVEEDOR/build/c/codebase-memory-mcp
+```
+
+La regresión crea fixtures estáticas pequeñas y con 150 archivos adicionales,
+verifica exactamente nueve consumidores en ambas rutas y rechaza enlaces al
+homónimo de otro paquete y al import externo. Usa caché/configuración aisladas,
+no ejecuta Python del ERP y retira sus archivos e índices incluso ante fallos.
+
+Tras verificar, copiar el binario a una ubicación permanente e inmutable por
+SHA256 fuera del worktree; conservar el original. Para seleccionar esa copia
+sin retirar la salida compacta, revisar la vista previa y aplicar:
+
+```sh
+python3 scripts/install_codebase_memory_compact.py --upstream-command /RUTA_PERMANENTE/codebase-memory-mcp
+python3 scripts/install_codebase_memory_compact.py --upstream-command /RUTA_PERMANENTE/codebase-memory-mcp --apply
+```
+
+El instalador exige un archivo ejecutable y conserva argumentos anteriores,
+permisos y el resto del TOML. Genera un respaldo nuevo; la reversión descrita
+arriba también sirve para volver al binario original. Abrir una conexión nueva
+antes de comprobarlo: cambiar la configuración no sustituye procesos abiertos.
+Reconstruir el índice afectado con el binario corregido; los índices anteriores
+no recuperan las aristas faltantes por cambiar solamente el ejecutable.
+
+Se repitieron las 18 llamadas sobre la misma copia estática del ERP
+`b6c3e354f34c060b946710c28444ece2574ed6a1`, sin normalizar imports:
+
+| Indexador | Respuesta completa | Compacta | Ahorro | Cobertura de llamadas |
+|---|---:|---:|---:|---:|
+| 0.8.1 original | 12,060 | 9,884 | 2,176 (18.04%) | 37/42 |
+| 0.8.1 con parche | 12,245 | 10,069 | 2,176 (17.77%) | 42/42 |
+
+Costeo pasa de 4/9 a 9/9. Se cotejaron identidades, no sólo cantidades. Los 185
+tokens adicionales contienen las dependencias recuperadas; el ahorro absoluto
+permanece intacto. Se verificó igualdad de código y de todos los campos retenidos
+entre salida completa y compacta; `trace_path` sigue sin filtrado. Estas cifras
+miden contexto recuperado con `o200k_base`, no el gasto total de una sesión.

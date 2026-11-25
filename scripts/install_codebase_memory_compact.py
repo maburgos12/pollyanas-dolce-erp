@@ -15,7 +15,7 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def plan_install(source, config, install_root, python):
+def plan_install(source, config, install_root, python, upstream_override=None):
     source, config, install_root = Path(source), Path(config), Path(install_root)
     before = config.read_bytes()
     parsed = tomllib.loads(before.decode())
@@ -27,6 +27,11 @@ def plan_install(source, config, install_root, python):
         upstream, upstream_args = upstream_args[2], upstream_args[3:]
         if upstream_args[:1] == ["--"]:
             upstream_args = upstream_args[1:]
+    if upstream_override is not None:
+        native = Path(upstream_override).expanduser().resolve()
+        if not native.is_file() or not os.access(native, os.X_OK):
+            raise RuntimeError("Native override must be an executable file")
+        upstream = str(native)
     runtime = source.read_bytes()
     destination = install_root / digest(runtime)[:16] / "codebase_memory_compact.py"
     text = before.decode()
@@ -112,8 +117,10 @@ def main():
     parser.add_argument("--config", type=Path, default=Path.home()/".codex/config.toml")
     parser.add_argument("--install-root", type=Path, default=Path.home()/".codex/tools/codebase-memory-compact")
     parser.add_argument("--apply", action="store_true", help="Default is a read-only preview")
+    parser.add_argument("--upstream-command", type=Path, help="Explicit native binary override; keeps the compact adapter and existing upstream arguments")
     args = parser.parse_args()
-    plan = plan_install(Path(__file__).with_name("codebase_memory_compact.py"), args.config, args.install_root, sys.executable)
+    plan = plan_install(Path(__file__).with_name("codebase_memory_compact.py"), args.config, args.install_root, sys.executable,
+                        upstream_override=args.upstream_command)
     receipt = apply_install(plan) if args.apply else {key:value for key,value in plan.items() if key != "config_after"}
     print(json.dumps(receipt, indent=2))
 

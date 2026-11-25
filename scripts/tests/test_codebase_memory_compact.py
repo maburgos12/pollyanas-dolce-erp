@@ -187,6 +187,28 @@ command = "/keep/this"
         self.assertEqual(next_plan["upstream_command"], "/original/graph")
         self.assertEqual(next_plan["upstream_args"], ["--ui=false"])
 
+    def test_explicit_native_override_keeps_adapter_and_existing_settings(self):
+        native = (self.root / "native-fixed").resolve()
+        native.write_text("#!/bin/sh\nexit 0\n")
+        native.chmod(0o700)
+        apply_install(plan_install(self.source, self.config, self.root / "installed", sys.executable))
+        plan = plan_install(self.source, self.config, self.root / "installed", sys.executable,
+                            upstream_override=native)
+        self.assertEqual(plan["upstream_command"], str(native))
+        self.assertEqual(plan["upstream_args"], ["--ui=false"])
+        receipt = apply_install(plan)
+        self.assertIn('"--upstream", "' + str(native) + '"', self.config.read_text())
+        self.assertIn('approval_mode = "approve"', self.config.read_text())
+        self.assertTrue(Path(receipt["config_backup"]).exists())
+        self.assertFalse(plan_install(self.source, self.config, self.root / "installed",
+                                      sys.executable, upstream_override=native)["changed"])
+
+    def test_native_override_must_be_an_executable_file(self):
+        with self.assertRaisesRegex(RuntimeError, "executable"):
+            plan_install(self.source, self.config, self.root / "installed", sys.executable,
+                         upstream_override=self.root / "missing")
+        self.assertEqual(self.config.read_text(), self.CONFIG)
+
     def test_refuses_to_overwrite_a_concurrent_configuration_change(self):
         plan = plan_install(self.source, self.config, self.root / "installed", sys.executable)
         self.config.write_text(self.CONFIG + "# added by another task\n")
