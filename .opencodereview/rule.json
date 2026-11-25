@@ -1,0 +1,21 @@
+{
+  "include": [
+    "**/*.md",
+    "**/test*.py",
+    "**/tests/**",
+    "**/tests*.py",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/Dockerfile*",
+    "Dockerfile*",
+    ".github/workflows/**",
+    ".codex/**"
+  ],
+  "rules": [
+    {
+      "path": "**/*",
+      "merge_system_rule": true,
+      "rule": "Revisar con AGENTS aplicables y consumidores reales. Para SQL literal, cotejar tablas/columnas con modelos, db_table y migraciones; no inferir que una excepción requiere migrar. En reasignaciones/importaciones, comprobar claves únicas, idempotencia, transacciones, filas destino existentes y fechas económicas frente a registro/procesamiento, incluidos NULL. En colas, comprobar identidad estable de paradas/sucursales/recursos, revocación y revalidación antes de consultar y escribir; orden o fecha solos pueden no identificar el contexto. Seguir contratos HTTP/JSON/HTML y actualización de controles dependientes, no sólo datos. Distinguir cantidad física capturada de cantidad esperada; no declarar corrupción o ampliar permisos por ausencia de un token o por suposición. Sustentar cada defecto con escenario alcanzable y fuente/consumidor; separar confirmado estático, pendiente y descartado. No afirmar ejecución, daño productivo ni cobertura por haber generado comentarios."
+    }
+  ]
+}

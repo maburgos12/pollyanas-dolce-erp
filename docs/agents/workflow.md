@@ -63,6 +63,12 @@ no incluir credenciales, capturas temporales, logs, outputs, `.DS_Store`,
 `.playwright-mcp` ni `.claude`. No presentar pruebas de un SHA anterior como actuales.
 Antes de subir, asegurar upstream y rama coherentes con el objetivo.
 
+Para cambios con reasignación/cálculo de datos, concurrencia, colas o contratos
+entre consumidores, considerar la segunda lectura [OCR delegada](code-review.md).
+Usarla cuando esos riesgos sean materiales, sin repetirla para cambios triviales
+o sólo documentales. Registrar su alcance y cobertura real; complementa la revisión
+habitual y no sustituye pruebas, revisión especializada ni los gates siguientes.
+
 PR de una sola tarea, como borrador salvo instrucción contraria; incluir resultado
 funcional, archivos principales, pruebas/comandos/SHA, validación real y recursos
 pendientes. Revisar aquí el diff antes de aprobar; si Mauricio pidió verlo antes
