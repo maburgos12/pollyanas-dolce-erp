@@ -99,6 +99,11 @@ jobs:
         run: python manage.py check
       - name: Enforce canonical Point sales reads
         run: python scripts/check_pointdailysale_usage.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prove ERP Point polling through the actual service worker
+        run: node scripts/tests/logistica_point_consumer.cjs
       - name: Verify backup and full-suite partition contracts
         run: |
           python -m unittest discover -s scripts/tests -p test_backup_db.py
