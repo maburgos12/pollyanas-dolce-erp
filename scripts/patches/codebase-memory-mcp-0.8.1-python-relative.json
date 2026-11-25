@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/DeusData/codebase-memory-mcp.git",
+  "upstream_ref": "v0.8.1",
+  "upstream_commit": "f0c9be19c5d74b84f418d807bfdce7b5d6a261ff",
+  "patch_sha256": "e2402a6fc08953ac4193d7c0f8c291e7dafce276f92cf2355fdc852afa6921fc",
+  "license": "MIT (upstream)",
+  "version_suffix": "0.8.1-pollyana-relative1",
+  "scope": "Canonical Python relative imports before LSP linking; avoid doubled relative dots; serial external-target guard matches parallel path. No MCP schema or compact-output changes."
+}

@@ -1,0 +1,154 @@
+diff --git a/internal/cbm/extract_imports.c b/internal/cbm/extract_imports.c
+index 717068a..a6f4537 100644
+--- a/internal/cbm/extract_imports.c
++++ b/internal/cbm/extract_imports.c
+@@ -180,7 +180,8 @@ static void emit_py_aliased_import(CBMExtractCtx *ctx, TSNode child, const char
+     }
+     const char *local = !ts_node_is_null(alias_node) ? cbm_node_text(a, alias_node, ctx->source)
+                                                      : path_last(a, name);
+-    const char *full = mod_prefix ? cbm_arena_sprintf(a, "%s.%s", mod_prefix, name) : name;
++    const char *full = mod_prefix ? cbm_arena_sprintf(a, "%s%s%s", mod_prefix,
++        mod_prefix[0] && mod_prefix[strlen(mod_prefix) - 1] == '.' ? "" : ".", name) : name;
+     CBMImport imp = {.local_name = local, .module_path = full};
+     cbm_imports_push(&ctx->result->imports, a, imp);
+ }
+@@ -238,7 +239,8 @@ static void emit_py_import_from_name(CBMExtractCtx *ctx, TSNode child, const cha
+     CBMArena *a = ctx->arena;
+     char *name = cbm_node_text(a, child, ctx->source);
+     if (name && name[0]) {
+-        const char *full = mod_path ? cbm_arena_sprintf(a, "%s.%s", mod_path, name) : name;
++        const char *full = mod_path ? cbm_arena_sprintf(a, "%s%s%s", mod_path,
++            mod_path[0] && mod_path[strlen(mod_path) - 1] == '.' ? "" : ".", name) : name;
+         CBMImport imp = {.local_name = name, .module_path = full};
+         cbm_imports_push(&ctx->result->imports, a, imp);
+     }
+diff --git a/internal/cbm/lsp/py_lsp.c b/internal/cbm/lsp/py_lsp.c
+index fe48222..39431b6 100644
+--- a/internal/cbm/lsp/py_lsp.c
++++ b/internal/cbm/lsp/py_lsp.c
+@@ -55,6 +55,32 @@ void py_lsp_init(PyLSPContext *ctx, CBMArena *arena, const char *source, int sou
+     ctx->debug = dbg && dbg[0] && dbg[0] != '0';
+ }
+
++/* Resolve Python relative imports before they become high-confidence LSP
++ * overrides. module_qn includes the source file (__init__ included), so one
++ * leading dot removes that file, two remove its parent as well, and so on.
++ * Preserve an unresolvable QN rather than guessing a same-named target. */
++static const char *py_canonical_import_qn(PyLSPContext *ctx, const char *qn) {
++    if (!qn || qn[0] != '.' || !ctx->module_qn)
++        return qn;
++    const char *tail = qn;
++    size_t prefix_len = strlen(ctx->module_qn);
++    while (*tail == '.') {
++        while (prefix_len > 0 && ctx->module_qn[prefix_len - 1] != '.')
++            prefix_len--;
++        if (prefix_len == 0)
++            return qn; /* Never walk above the project prefix. */
++        prefix_len--; /* Drop the separator and the final module component. */
++        tail++;
++    }
++    if (!*tail)
++        return qn;
++    char *prefix = cbm_arena_strndup(ctx->arena, ctx->module_qn, prefix_len);
++    if (!prefix)
++        return qn;
++    const char *canonical = cbm_arena_sprintf(ctx->arena, "%s.%s", prefix, tail);
++    return canonical ? canonical : qn;
++}
++
+ void py_lsp_add_import(PyLSPContext *ctx, const char *local_name, const char *module_qn) {
+     if (!ctx || !local_name || !module_qn)
+         return;
+@@ -72,7 +98,8 @@ void py_lsp_add_import(PyLSPContext *ctx, const char *local_name, const char *mo
+         qns[i] = ctx->import_module_qns[i];
+     }
+     names[ctx->import_count] = cbm_arena_strdup(ctx->arena, local_name);
+-    qns[ctx->import_count] = cbm_arena_strdup(ctx->arena, module_qn);
++    qns[ctx->import_count] =
++        cbm_arena_strdup(ctx->arena, py_canonical_import_qn(ctx, module_qn));
+     names[new_count] = NULL;
+     qns[new_count] = NULL;
+
+diff --git a/src/pipeline/pass_calls.c b/src/pipeline/pass_calls.c
+index 15d691d..14a1057 100644
+--- a/src/pipeline/pass_calls.c
++++ b/src/pipeline/pass_calls.c
+@@ -359,6 +359,9 @@ static int resolve_single_call(cbm_pipeline_ctx_t *ctx, CBMCall *call,
+                                  imp_vals, imp_count);
+             return SKIP_ONE;
+         }
++        /* Match the parallel path: a confident external/unindexed target
++         * must not fall through to a homonymous local registry candidate. */
++        return 0;
+     }
+
+     cbm_resolution_t res = cbm_registry_resolve(ctx->registry, call->callee_name, module_qn,
+diff --git a/tests/test_py_lsp.c b/tests/test_py_lsp.c
+index a93fa79..b30c103 100644
+--- a/tests/test_py_lsp.c
++++ b/tests/test_py_lsp.c
+@@ -1245,7 +1245,64 @@ TEST(pylsp_round6_property_access_chains) {
+
+ /* ── Suite ─────────────────────────────────────────────────────── */
+
++/* Relative imports must emit project-qualified targets before the parallel
++ * pipeline consumes single-file LSP results. A raw .module.name override
++ * otherwise suppresses the valid IMPORTS-based resolution. */
++TEST(pylsp_relative_import_canonical_targets) {
++    const char *paths[] = {"pkg/reader.py", "pkg/nested/reader.py", "pkg/__init__.py"};
++    const char *sources[] = {
++        "from .services_costos import asignar_costos_filas\n"
++        "def reader(rows):\n    return asignar_costos_filas(rows)\n",
++        "from ..services_costos import asignar_costos_filas\n"
++        "def reader(rows):\n    return asignar_costos_filas(rows)\n",
++        "from .services_costos import asignar_costos_filas\n"
++        "def reader(rows):\n    return asignar_costos_filas(rows)\n"
++    };
++    for (int i = 0; i < 3; i++) {
++        CBMFileResult *r = cbm_extract_file(sources[i], (int)strlen(sources[i]),
++                                           CBM_LANG_PYTHON, "test", paths[i], 0, NULL, NULL);
++        ASSERT_NOT_NULL(r);
++        int hit = find_resolved(r, ".reader", "asignar_costos_filas");
++        ASSERT_GTE(hit, 0);
++        ASSERT_STR_EQ(r->resolved_calls.items[hit].callee_qn,
++                      "test.pkg.services_costos.asignar_costos_filas");
++        cbm_free_result(r);
++    }
++    PASS();
++}
++
++TEST(pylsp_relative_import_module_without_extra_dot) {
++    const char *src = "from . import services_costos\n"
++                      "def reader(rows):\n    return services_costos.asignar_costos_filas(rows)\n";
++    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_PYTHON,
++                                       "test", "pkg/reader.py", 0, NULL, NULL);
++    ASSERT_NOT_NULL(r);
++    ASSERT_EQ(r->imports.count, 1);
++    ASSERT_STR_EQ(r->imports.items[0].module_path, ".services_costos");
++    cbm_free_result(r);
++    PASS();
++}
++
++TEST(pylsp_relative_import_cannot_escape_project) {
++    CBMArena a;
++    cbm_arena_init(&a);
++    CBMTypeRegistry reg;
++    cbm_registry_init(&reg, &a);
++    PyLSPContext ctx;
++    py_lsp_init(&ctx, &a, "", 0, &reg, "test.pkg.reader", NULL);
++    py_lsp_add_import(&ctx, "f", "...outside.f");
++    py_lsp_bind_imports(&ctx);
++    const CBMType *t = py_lsp_lookup_in_scope(&ctx, "f");
++    ASSERT_EQ(t->kind, CBM_TYPE_NAMED);
++    ASSERT_STR_EQ(t->data.named.qualified_name, "...outside.f");
++    cbm_arena_destroy(&a);
++    PASS();
++}
++
+ SUITE(py_lsp) {
++    RUN_TEST(pylsp_relative_import_canonical_targets);
++    RUN_TEST(pylsp_relative_import_module_without_extra_dot);
++    RUN_TEST(pylsp_relative_import_cannot_escape_project);
+     /* Phase 2 — smoke */
+     RUN_TEST(pylsp_smoke_empty);
+     RUN_TEST(pylsp_smoke_one_function);
