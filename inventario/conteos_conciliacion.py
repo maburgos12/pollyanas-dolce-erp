@@ -91,7 +91,7 @@ def calcular_cierre_linea(reading, *, snapshot, batch, cierre, branch_id, now=No
             or not cycle.finished_at
             or not cycle.started_at <= snapshot.captured_at <= cycle.finished_at <= now):
         return _pendiente('El snapshot no pertenece a un ciclo Point completo y válido.',reintentar=True)
-    raw_stock = leer_fila_point(snapshot.raw_payload,codigo=line.codigo)
+    raw_stock = leer_fila_point(snapshot.effective_raw_payload,codigo=line.codigo)
     if raw_stock is None or raw_stock[0] != snapshot.stock or not misma_unidad(raw_stock[1],line.unidad):
         return _pendiente('Cantidad, código o unidad Point sin evidencia consistente.',reintentar=True)
     if batch is None:

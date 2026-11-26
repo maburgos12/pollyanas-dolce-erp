@@ -91,6 +91,21 @@ class NightlyCountTests(TestCase):
             self.assertEqual(conciliar_conteos_nocturnos()['procesados'],0)
             client.assert_not_called()
 
+    def test_close_reads_shared_evidence_and_keeps_original_snapshot(self):
+        from pos_bridge.services.sync_service import _share_inventory_payloads
+
+        _share_inventory_payloads([self.snapshot])
+        self.snapshot.save(update_fields=['shared_payload', 'raw_payload'])
+        with patch('inventario.conteos_nocturna.load_point_bridge_settings', return_value=self.settings), \
+                patch('inventario.conteos_nocturna.PointHttpSessionClient', return_value=self.fake):
+            summary = conciliar_conteos_nocturnos()
+        self.count.refresh_from_db()
+        self.assertEqual(summary['calculados'], 1)
+        result = self.count.conciliacion['lineas'][str(self.line.pk)]
+        self.assertEqual(Decimal(result['point_al_cierre']), 4)
+        self.snapshot.refresh_from_db()
+        self.assertEqual(self.snapshot.captured_at, self.close + timedelta(minutes=30))
+
     def test_difference_stays_sent_until_reviewer_requests_recount(self):
         reading=self.line.lecturas.get(ronda=1)
         reading.cantidad=Decimal('2')

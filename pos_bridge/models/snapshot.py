@@ -4,6 +4,14 @@ from django.db import models
 from django.utils import timezone
 
 
+class PointInventoryPayload(models.Model):
+    digest = models.CharField(max_length=64, unique=True)
+    payload = models.JSONField()
+
+    class Meta:
+        db_table = "pos_bridge_inventory_payloads"
+
+
 class PointInventorySnapshot(models.Model):
     branch = models.ForeignKey("pos_bridge.PointBranch", on_delete=models.PROTECT, related_name="snapshots")
     product = models.ForeignKey("pos_bridge.PointProduct", on_delete=models.PROTECT, related_name="snapshots")
@@ -13,6 +21,14 @@ class PointInventorySnapshot(models.Model):
     captured_at = models.DateTimeField(default=timezone.now, db_index=True)
     sync_job = models.ForeignKey("pos_bridge.PointSyncJob", on_delete=models.PROTECT, related_name="snapshots")
     raw_payload = models.JSONField(default=dict, blank=True)
+    shared_payload = models.ForeignKey(
+        PointInventoryPayload, null=True, editable=False, db_index=False,
+        on_delete=models.PROTECT, related_name="+",
+    )
+
+    @property
+    def effective_raw_payload(self):
+        return self.shared_payload.payload if self.shared_payload_id is not None else self.raw_payload
 
     class Meta:
         db_table = "pos_bridge_inventory_snapshots"

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import logging
 from datetime import date
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -23,6 +26,7 @@ from pos_bridge.models import (
     PointProduct,
     PointSyncJob,
 )
+from pos_bridge.models.snapshot import PointInventoryPayload
 from pos_bridge.services.alert_service import PointAlertService
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
@@ -47,6 +51,41 @@ LOG_LEVELS = {
     PointExtractionLog.LEVEL_WARNING: logging.WARNING,
     PointExtractionLog.LEVEL_ERROR: logging.ERROR,
 }
+
+
+def _payload_bytes(payload):
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
+
+
+def _share_inventory_payloads(snapshots):
+    encoded = {}
+    payloads = {}
+    references = []
+    for snapshot in snapshots:
+        if snapshot.raw_payload == {}:
+            continue
+        raw = _payload_bytes(snapshot.raw_payload)
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest in encoded and encoded[digest] != raw:
+            raise PersistenceError("Conflicto de huella en evidencia Point.")
+        encoded[digest] = raw
+        payloads[digest] = snapshot.raw_payload
+        references.append((snapshot, digest))
+
+    existing = PointInventoryPayload.objects.in_bulk(payloads, field_name="digest")
+    missing = sorted(payloads.keys() - existing.keys())
+    if missing:
+        PointInventoryPayload.objects.bulk_create(
+            [PointInventoryPayload(digest=key, payload=payloads[key]) for key in missing],
+            ignore_conflicts=True, batch_size=500,
+        )
+        existing.update(PointInventoryPayload.objects.in_bulk(missing, field_name="digest"))
+    for key, evidence in existing.items():
+        if _payload_bytes(evidence.payload) != encoded[key]:
+            raise PersistenceError("Conflicto de huella en evidencia Point.")
+    for snapshot, digest in references:
+        snapshot.shared_payload = existing[digest]
+        snapshot.raw_payload = {}
 
 
 class PointSyncService:
@@ -192,6 +231,8 @@ class PointSyncService:
                 )
             )
 
+        if settings.POINT_INVENTORY_SHARE_PAYLOADS:
+            _share_inventory_payloads(snapshots_to_create)
         PointInventorySnapshot.objects.bulk_create(snapshots_to_create, batch_size=500)
         from reportes.services_inventory_audit_refresh import enqueue_inventory_audit_months
         enqueue_inventory_audit_months(snapshot_affected_months(branch_result.captured_at))
