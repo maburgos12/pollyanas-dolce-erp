@@ -116,6 +116,27 @@ revisión. No cambia el cron ni el modo `--verify-only`.
 
 Ejecutar secuencialmente y comparar `df -B1 /` antes y después de cada punto.
 
+### Comprobación con hashing en el NAS
+
+El comando restringido `verify-local PUNTO SHA256 GENERACION` verifica en el NAS
+el manifiesto, los cuatro archivos del punto y todos los tamaños y hashes de sus
+medios, sin publicar un recibo de restauración. El VPS valida la respuesta con
+la clave SSH existente, contra el punto, manifiesto, generación y conteo del
+recibo privado de una restauración real. Por SMB comprueba el mismo manifiesto
+antes y después y abre cada carga en el montaje real de solo lectura.
+
+Primero actualizar el script restringido del NAS sin ampliar la clave ni cambiar
+sus permisos. Después validar **sin retiro** con
+`erp-rotate-verified-backups --check-proof PUNTO --nas-side` por cada punto,
+o `vps_backup_health.py --verify-only --nas-side` para todo el conjunto.
+Solo para un punto autorizado, usar `--retire-point PUNTO --nas-side` después
+de la validación. El último punto local, los bloqueos, los recibos y los controles
+de enlaces siguen siendo obligatorios. Si el NAS o SMB falla, conservar los
+archivos. No existe fallback que permita retirar por falta de una prueba.
+
+Sin `--nas-side` se conserva la comprobación histórica por SMB. Este cambio no
+activa el modo nuevo en el cron ni autoriza un retiro masivo.
+
 ### Monitor de alertas
 
 Después del merge y despliegue Git, instalar las dos unidades de `scripts/ops/`

@@ -40,7 +40,7 @@ def atomic(path, text):
     temp.replace(path)
 
 
-def verify_point(rotator, stem, receipts=None):
+def verify_point(rotator, stem, receipts=None, *, nas_side=False):
     manifest, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
     directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
     path = directories[0] / (stem + '.json')
@@ -53,6 +53,7 @@ def verify_point(rotator, stem, receipts=None):
             break
         except (OSError, ValueError, KeyError, TypeError):
             continue
+    options = {'nas_side': True} if nas_side else {}
     if proof is None:
         payload = json.loads(run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ConnectTimeout=20', NAS_ALIAS, 'restore', stem, checksum]))
@@ -70,16 +71,17 @@ def verify_point(rotator, stem, receipts=None):
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         proof['media_aliases'] = aliases
-        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
+        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof, **options)
         atomic(path.with_suffix('.restore.log'), evidence)
         atomic(path, json.dumps(proof, indent=2) + '\n')
         rotator.require(rotator.read_receipt(path, stem) == proof, 'Published receipt changed')
     else:
-        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
+        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof, **options)
     return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
 
 
-def maintain(rotator, verify_only=False):
+def maintain(rotator, verify_only=False, *, nas_side=False):
+    rotator.require(not nas_side or verify_only, 'NAS-side verification requires verify-only')
     receipts = None
     if verify_only:
         receipts = STATE / 'verification-receipts'
@@ -101,7 +103,8 @@ def maintain(rotator, verify_only=False):
                         'Newest backup is over 48 hours old')
         run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=20',
              NAS_ALIAS, 'status'])
-        verified = [verify_point(rotator, point, receipts=receipts) for point in points]
+        options = {'nas_side': True} if nas_side else {}
+        verified = [verify_point(rotator, point, receipts=receipts, **options) for point in points]
     if verify_only:
         return dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")
     # The rotator reacquires its lock and checks the current newest set and every proof.
@@ -126,7 +129,10 @@ def maintain(rotator, verify_only=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--verify-only', action='store_true', help='Verify recovery without rotation or Docker maintenance')
+    parser.add_argument('--nas-side', action='store_true', help='Hash on NAS and separately check SMB access')
     args = parser.parse_args()
+    if args.nas_side and not args.verify_only:
+        parser.error('--nas-side requires --verify-only')
     os.umask(0o077)
     STATE.mkdir(exist_ok=True)
     report = dict(started_epoch=time.time(), success=False)
@@ -135,7 +141,8 @@ def main():
         try:
             report['before'] = snapshot()
             rotator = importlib.machinery.SourceFileLoader('rotator', ROTATOR).load_module()
-            report.update(maintain(rotator, verify_only=args.verify_only))
+            options = {'nas_side': True} if args.nas_side else {}
+            report.update(maintain(rotator, verify_only=args.verify_only, **options))
             report['success'] = True
         except Exception as error:
             report['error'] = str(error)

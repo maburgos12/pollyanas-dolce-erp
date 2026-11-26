@@ -20,6 +20,7 @@ import time
 HOME = Path('/share/homes/DolcePasteleria/.erp-backup-verifier')
 NAS = Path('/share/ERP_BACKUPS')
 POINT = re.compile(r'backup_[0-9]{8}_[0-9]{6}')
+GENERATION = re.compile(r'latest|[0-9]{12}\.Q')
 SUFFIXES = ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'media.json')
 
 
@@ -29,11 +30,13 @@ def require(ok, message):
 
 
 def sha(path):
-    with path.open('rb') as stream:
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
         before = os.fstat(stream.fileno())
+        require(stat.S_ISREG(before.st_mode), 'Source is not a regular file')
         result = hashlib.file_digest(stream, 'sha256').hexdigest()
         after = os.fstat(stream.fileno())
-    require((before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns), 'Source changed')
+    require((before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+            == (after.st_size, after.st_mtime_ns, after.st_ctime_ns), 'Source changed')
     return result
 
 
@@ -41,6 +44,15 @@ def relative(value):
     path = PurePosixPath(value)
     require(path.parts and not path.is_absolute() and '..' not in path.parts, 'Unsafe path')
     return path
+
+
+def read_inventory(path, limit):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_size <= limit, 'Invalid NAS inventory size')
+        raw = stream.read(limit + 1)
+    require(len(raw) <= limit, 'NAS inventory too large')
+    return raw
 
 
 def private_bytes(path):
@@ -109,9 +121,10 @@ def install_service_key(key, expected):
 def manifest(point, expected):
     require(POINT.fullmatch(point), 'Invalid point')
     path = NAS / (point + '.manifest')
-    require(sha(path) == expected, 'NAS manifest differs from VPS')
+    raw = read_inventory(path, 4096)
+    require(hashlib.sha256(raw).hexdigest() == expected, 'NAS manifest differs from VPS')
     hashes = {}
-    for line in path.read_text().splitlines():
+    for line in raw.decode('ascii').splitlines():
         checksum, name = line.split()
         require(name not in hashes and re.fullmatch('[a-f0-9]{64}', checksum), 'Invalid manifest')
         hashes[name] = checksum
@@ -121,11 +134,15 @@ def manifest(point, expected):
     return hashes
 
 
-def media_sources(point):
-    inventory = json.loads((NAS / (point + '.media.json')).read_text())
+def media_sources(point, generation='latest', checksum=None):
+    require(GENERATION.fullmatch(generation), 'Unsafe generation')
+    raw = read_inventory(NAS / (point + '.media.json'), 32 * 1024 * 1024)
+    if checksum is not None:
+        require(hashlib.sha256(raw).hexdigest() == checksum, 'NAS media inventory changed')
+    inventory = json.loads(raw)
     require(inventory['version'] == 1, 'Unsupported media inventory')
     versions = NAS / 'ERP_ACTIVE_MEDIA_VERSIONS/ERP medios activos - 7 versiones'
-    source = (versions / 'latest/ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING').resolve()
+    source = (versions / generation / 'ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING').resolve(strict=True)
     require(source.is_relative_to(versions.resolve()), 'Unsafe generation')
     seen = set()
     for row in inventory['files']:
@@ -135,6 +152,23 @@ def media_sources(point):
         require(original.resolve().is_relative_to(source) and original.is_file(), 'Missing/unsafe media')
         seen.add(name)
         yield row, original
+
+
+def verify_local(point, expected, generation):
+    hashes = manifest(point, expected)
+    count = 0
+    for row, original in media_sources(point, generation, hashes[point + '.media.json']):
+        initial = original.stat()
+        require(type(row['bytes']) is int and initial.st_size == row['bytes'], 'NAS media size differs')
+        require(sha(original) == row['sha256'], 'NAS media hash differs')
+        final = original.stat()
+        require((initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns, initial.st_ctime_ns)
+                == (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns, final.st_ctime_ns),
+                'NAS media changed')
+        count += 1
+    require(count > 0 and sha(NAS / (point + '.manifest')) == expected, 'NAS point changed or empty')
+    return dict(version=1, state='VERIFIED', point=point, manifest_sha256=expected,
+                generation=generation, media=count)
 
 
 def preflight(point, expected):
@@ -152,6 +186,18 @@ def preflight(point, expected):
 def ssh_command(value):
     if value == 'status':
         print(json.dumps(dict(version=1, state='READY')), flush=True)
+        return
+    fixed = re.fullmatch(
+        r'verify-local (backup_[0-9]{8}_[0-9]{6}) ([a-f0-9]{64}) (latest|[0-9]{12}\.Q)', value
+    ) if isinstance(value, str) else None
+    if fixed:
+        with (HOME / 'restore.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            signal.alarm(780)
+            try:
+                print(json.dumps(verify_local(*fixed.groups())), flush=True)
+            finally:
+                signal.alarm(0)
         return
     require(isinstance(value, str) and re.fullmatch(
         r'(preflight|restore) backup_[0-9]{8}_[0-9]{6} [a-f0-9]{64}', value),

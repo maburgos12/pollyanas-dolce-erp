@@ -1,6 +1,7 @@
 import importlib.util
 import fcntl
 import hashlib
+import json
 import os
 import signal
 import sys
@@ -75,6 +76,40 @@ class RetirePointTests(unittest.TestCase):
 
 
 class BoundedNASProofTests(unittest.TestCase):
+    def test_nas_side_does_not_enable_bulk_retirement(self):
+        result = subprocess.run([sys.executable, r.__file__, '--apply', '--nas-side'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('requiere un punto exacto', result.stderr)
+
+    def test_nas_side_checks_smb_access_and_exact_authenticated_result(self):
+        stem = 'backup_20261122_020001'
+        proof = {'manifest_sha256': 'a' * 64, 'verified_media': 3078, 'media_generations': ['latest']}
+        manifest = stem + '.manifest'
+        expected = {'version': 1, 'state': 'VERIFIED', 'point': stem,
+                    'manifest_sha256': 'a' * 64, 'generation': 'latest', 'media': 3078}
+        with patch.object(r, 'local_set', return_value=(manifest, 'a' * 64, {})), \
+                patch.object(r, 'digest', return_value='a' * 64) as digest, \
+                patch.object(r.subprocess, 'check_output', return_value=json.dumps(expected)) as ssh:
+            root, nas = Path('/local'), Path('/mounted-share')
+            self.assertEqual(r.check_nas_side(root, nas, stem, proof, 123), (manifest, {}, 'latest'))
+            self.assertEqual(digest.call_count, 2)
+            digest.assert_called_with(nas / manifest, 123)
+            self.assertEqual(ssh.call_args.args[0][-5:], [
+                'qnap-nasdolce-verify', 'verify-local', stem, 'a' * 64, 'latest',
+            ])
+            for key, wrong in (('point', 'backup_20261121_020001'), ('manifest_sha256', 'b' * 64),
+                               ('generation', 'other'), ('media', 3077), ('state', 'READABLE'),
+                               ('version', True)):
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    ssh.return_value = json.dumps({**expected, key: wrong})
+                    r.check_nas_side(root, nas, stem, proof, 123)
+            ssh.reset_mock()
+            digest.side_effect = PermissionError
+            with self.assertRaises(PermissionError):
+                r.check_nas_side(root, nas, stem, proof, 123)
+            ssh.assert_not_called()
+
     def test_timeout_kills_without_second_wait_or_parent_nas_access(self):
         child = Mock(pid=12345)
         child.wait.side_effect = subprocess.TimeoutExpired('probe', 1)
