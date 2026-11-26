@@ -8,9 +8,9 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import AvisoClima, CampanaClima, Empleado, ParticipanteClima, RespuestaClima
+from .models import AvisoClima, CampanaClima, Empleado, EventoCampanaClima, ParticipanteClima, RespuestaClima
 from .views_clima import QUESTIONNAIRE
-from .services_clima_avisos import enviar_confirmacion_clima, procesar_avisos_clima
+from .services_clima_avisos import digest_telefono, enviar_confirmacion_clima, procesar_avisos_clima
 from core.whatsapp import ResultadoWhatsApp, enviar_plantilla
 
 
@@ -191,14 +191,14 @@ class PreparacionClimaTests(TestCase):
         self.assertEqual(self.client.get(detalle).status_code, 403)
         self.client.force_login(self.admin)
         response = self.client.get(detalle)
-        self.assertContains(response, "5 personas pendientes: 1 con contacto")
-        self.assertContains(response, "2 con dato compartido")
-        self.assertContains(response, "1 que ya no están activas")
+        self.assertContains(response, "Pendientes: 5; con contacto personal de formato utilizable y no compartido: 1")
+        self.assertContains(response, "con dato compartido: 2")
+        self.assertContains(response, "ya inactivas: 1")
         self.assertNotContains(response, "Compartido@Example.com")
         self.assertNotContains(response, "667 123 4567")
         segundo.email = "unico@example.com"
         segundo.save(update_fields=["email"])
-        self.assertContains(self.client.get(detalle), "5 personas pendientes: 3 con contacto")
+        self.assertContains(self.client.get(detalle), "Pendientes: 5; con contacto personal de formato utilizable y no compartido: 3")
         self.assertFalse(CampanaClima.objects.get(pk=campana.pk).recepcion_habilitada)
 
 
@@ -207,12 +207,13 @@ class AvisosClimaTests(TestCase):
         admin = get_user_model().objects.create_superuser("clima_aviso_admin", "admin@example.com", "pass")
         self.campana = CampanaClima.objects.create(
             titulo="Prueba", fecha_cierre=timezone.localdate() + timedelta(days=14),
-            cuestionario=QUESTIONNAIRE, creada_por=admin,
+            cuestionario=QUESTIONNAIRE, creada_por=admin, envio_solicitado_en=timezone.now(),
         )
         empleado = Empleado.objects.create(nombre="Ana Ejemplo", telefono="6671234567")
         self.persona = ParticipanteClima.objects.create(
             campana=self.campana, empleado=empleado, nombre=empleado.nombre,
             envio_whatsapp_autorizado=True,
+            telefono_autorizado_digest=digest_telefono("526671234567"),
         )
 
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
@@ -314,6 +315,20 @@ class AvisosClimaTests(TestCase):
         enviar.assert_called_once()
 
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_entrega_fallida_no_genera_recordatorio_automatico(self, enviar):
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        AvisoClima.objects.create(
+            participante=self.persona, tipo=AvisoClima.INVITACION,
+            estado="ENVIADO", entrega_estado="FALLIDO",
+            intentado_en=timezone.now() - timedelta(days=4),
+        )
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        enviar.assert_not_called()
+
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
     def test_contacto_compartido_o_no_autorizado_se_omite(self, enviar):
         self.campana.recepcion_habilitada = True
         self.campana.save(update_fields=["recepcion_habilitada"])
@@ -346,3 +361,105 @@ class AvisosClimaTests(TestCase):
             self.assertEqual(procesar_avisos_clima()["procesados"], 0)
         self.assertEqual(AvisoClima.objects.get().estado, "INCIERTO")
         enviar.assert_called_once()
+
+
+class ControlCampanaClimaTests(TestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser("clima_control", "control@example.com", "pass")
+        self.campana = CampanaClima.objects.create(
+            titulo="Diciembre de prueba", fecha_cierre=timezone.localdate() + timedelta(days=14),
+            cuestionario=QUESTIONNAIRE, creada_por=self.admin,
+        )
+        self.empleado = Empleado.objects.create(nombre="LUGO ESPINOZA PAULA", telefono="6671234567")
+        self.persona = ParticipanteClima.objects.create(campana=self.campana, empleado=self.empleado, nombre=self.empleado.nombre)
+        self.url = reverse("rrhh:clima_accion", args=[self.campana.pk])
+        self.client.force_login(self.admin)
+
+    def accion(self, accion, **datos):
+        return self.client.post(self.url, {"accion": accion, **datos}, HTTP_ACCEPT="application/json")
+
+    def test_padron_borrador_se_corrige_solo_antes_de_autorizar(self):
+        nueva = Empleado.objects.create(nombre="Nueva persona", telefono="6671112233")
+        self.assertEqual(self.accion("padron", empleados=[str(nueva.pk)]).status_code, 200)
+        self.assertEqual(list(self.campana.participantes.values_list("empleado_id", flat=True)), [nueva.pk])
+        self.assertEqual(self.accion("padron", empleados=[str(self.empleado.pk), str(nueva.pk)]).status_code, 200)
+        self.assertEqual(self.campana.participantes.count(), 2)
+        self.assertEqual(self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si").status_code, 404)
+        incluida = self.campana.participantes.get(empleado=nueva)
+        self.assertEqual(self.accion("autorizar", participante_id=incluida.pk, titularidad_confirmada="si").status_code, 200)
+        self.assertEqual(self.accion("padron", empleados=[str(self.empleado.pk)]).status_code, 400)
+
+    def test_orden_autorizacion_apertura_envio_y_auditoria(self):
+        self.assertEqual(self.accion("abrir").status_code, 400)
+        self.assertEqual(self.accion("autorizar", participante_id=self.persona.pk).status_code, 400)
+        self.assertEqual(self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si").status_code, 200)
+        self.persona.refresh_from_db()
+        self.assertEqual(self.persona.telefono_autorizado_digest, digest_telefono("526671234567"))
+        self.assertEqual(self.accion("enviar").status_code, 400)
+        self.assertEqual(self.accion("abrir").status_code, 200)
+        self.assertEqual(self.accion("enviar").status_code, 400)
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            with patch("rrhh.tasks.procesar_avisos_clima_campana.delay") as cola:
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.assertEqual(self.accion("enviar").status_code, 200)
+                self.assertEqual(self.accion("enviar").status_code, 200)
+                cola.assert_called_once_with(self.campana.pk)
+        self.assertEqual(list(EventoCampanaClima.objects.filter(campana=self.campana).values_list("accion", flat=True)),
+                         ["ENVIAR", "ABRIR", "AUTORIZAR"])
+
+    def test_cambio_de_numero_y_baja_bloquean_apertura_o_envio(self):
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        self.empleado.telefono = "6677654321"
+        self.empleado.save(update_fields=["telefono"])
+        self.assertEqual(self.accion("abrir").status_code, 400)
+        self.assertFalse(CampanaClima.objects.get(pk=self.campana.pk).recepcion_habilitada)
+        self.accion("revocar", participante_id=self.persona.pk)
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        self.assertEqual(self.accion("abrir").status_code, 200)
+        self.empleado.activo = False
+        self.empleado.save(update_fields=["activo"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(self.accion("enviar").status_code, 400)
+        self.assertIsNone(CampanaClima.objects.get(pk=self.campana.pk).envio_solicitado_en)
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_barrido_no_toma_campanas_no_enviadas_ni_telefonos_cambiados(self, enviar):
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        self.accion("abrir")
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+            self.campana.envio_solicitado_en = timezone.now()
+            self.campana.save(update_fields=["envio_solicitado_en"])
+            self.empleado.telefono = "6677654321"
+            self.empleado.save(update_fields=["telefono"])
+            self.assertEqual(procesar_avisos_clima(campana_id=self.campana.pk)["procesados"], 0)
+        enviar.assert_not_called()
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_envio_acotado_a_la_campana_solicitada(self, enviar):
+        enviar.return_value = ResultadoWhatsApp("ENVIADO", referencia="wamid.test")
+        otra = CampanaClima.objects.create(
+            titulo="Otra prueba", fecha_cierre=self.campana.fecha_cierre,
+            cuestionario=QUESTIONNAIRE, creada_por=self.admin,
+            recepcion_habilitada=True, envio_solicitado_en=timezone.now(),
+        )
+        otra_empleada = Empleado.objects.create(nombre="Otra persona", telefono="6677654321")
+        ParticipanteClima.objects.create(
+            campana=otra, empleado=otra_empleada, nombre=otra_empleada.nombre,
+            envio_whatsapp_autorizado=True, telefono_autorizado_digest=digest_telefono("526677654321"),
+        )
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        self.accion("abrir")
+        self.campana.envio_solicitado_en = timezone.now()
+        self.campana.save(update_fields=["envio_solicitado_en"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima(campana_id=self.campana.pk)["procesados"], 1)
+        self.assertEqual(AvisoClima.objects.filter(participante__campana=self.campana).count(), 1)
+        self.assertEqual(AvisoClima.objects.filter(participante__campana=otra).count(), 0)
+        enviar.assert_called_once()
+
+    def test_usuario_sin_gestion_no_puede_autorizar(self):
+        otro = get_user_model().objects.create_user("clima_lector", password="pass")
+        self.client.force_login(otro)
+        self.assertEqual(self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si").status_code, 403)
+        self.assertFalse(ParticipanteClima.objects.get(pk=self.persona.pk).envio_whatsapp_autorizado)
