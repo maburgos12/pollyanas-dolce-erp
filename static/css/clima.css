@@ -33,5 +33,11 @@
 .clima-campanas{list-style:none;padding:0;margin:0}
 .clima-campanas li{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid #e9dedf;padding:.85rem 0}
 .clima-status{display:flex;flex-wrap:wrap;gap:.75rem;padding:1rem;background:#f8e8ee;border-radius:8px}
+.clima-send-status{display:flex;flex-direction:column;gap:.3rem;padding:.85rem 1rem;background:#f8e8ee;border:1px solid #d9b8c5;border-radius:8px;line-height:1.45}
+.clima-send-counts{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;margin:1rem 0}
+.clima-send-counts p{display:flex;flex-direction:column;gap:.1rem;margin:0;min-width:9rem}
+.clima-send-counts strong{font-size:1.4rem;line-height:1.2}
+.clima-send-counts span{font-size:.9rem;color:#66545a}
+.clima-send-caveat{max-width:65ch;color:#694450}
 .clima-qr{display:block;width:min(100%,240px);height:auto;margin:1rem 0}
 @media(max-width:600px){.clima-section{padding:1rem}.clima-campanas li{flex-direction:column}.clima-roster-list{max-height:500px}}

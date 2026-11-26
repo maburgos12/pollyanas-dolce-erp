@@ -355,6 +355,7 @@ CELERY_TASK_ROUTES = {
     "horarios_especiales.reconcile_approved": {"queue": "hours_control"},
     "horarios_especiales.execute_request": {"queue": "hours_publish"},
     "rrhh.procesar_avisos_clima": {"queue": "notificaciones"},
+    "rrhh.procesar_avisos_clima_campana": {"queue": "notificaciones"},
     "rrhh.enviar_confirmacion_clima": {"queue": "notificaciones"},
     "sat_client.ejecutar_descarga_sat_nocturna": {"queue": "sat"},
     "rrhh.tasks.avisar_cumpleanos": {"queue": "notificaciones"},
