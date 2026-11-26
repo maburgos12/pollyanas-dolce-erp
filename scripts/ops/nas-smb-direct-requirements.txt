@@ -1,0 +1,6 @@
+# VPS Ubuntu 24.04 amd64, Python 3.12; used only by the isolated SMB reader.
+cffi==2.1.1 --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf
+cryptography==50.0.2 --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079
+pycparser==3.12 --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+pyspnego==0.12.4 --hash=sha256:a29a34de1abe9e9b30d9aa1d363f8e49fc159eb7355b1f2ee86ccb3a2ce3bba9
+smbprotocol==1.16.0 --hash=sha256:65427e30114d420f5f5ae878d93aa1f256d686105af898ab2f8f2485c9c7989a

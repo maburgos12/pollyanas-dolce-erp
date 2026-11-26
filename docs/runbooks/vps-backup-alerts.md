@@ -137,6 +137,23 @@ archivos. No existe fallback que permita retirar por falta de una prueba.
 Sin `--nas-side` se conserva la comprobación histórica por SMB. Este cambio no
 activa el modo nuevo en el cron ni autoriza un retiro masivo.
 
+Si el cliente CIFS del kernel queda en reconexión, `--smb-direct` junto con
+`--nas-side` usa el mismo recurso y la credencial privada de la unidad, pero
+abre una sesión SMB 3.1.1 cifrada propia. No activa ni cambia el montaje.
+Exige el manifiesto por SMB antes y después de comprobar los hashes en el
+NAS y abre los cuatro archivos exactos sin seguir puntos de reanálisis.
+Si falta el cliente o falla la lectura, no se retira nada.
+
+Tras integrar el cambio, crear **solo para el verificador** el entorno root
+`/opt/erp-backup-smb-direct` con `python3 -m venv`. Instalar las dependencias
+con ese Python y `pip --isolated install --require-hashes --only-binary=:all:
+-r scripts/ops/nas-smb-direct-requirements.txt`. Los hashes corresponden al VPS
+Ubuntu 24.04 amd64 con Python 3.12; no instalar en el Python del sistema.
+Verificar el entorno en solo lectura con `--check-proof PUNTO --nas-side
+--smb-direct` antes de considerar un retiro. El modo independiente está
+disponible también en `vps_backup_health.py --verify-only --nas-side --smb-direct`.
+No cambiar el cron, desmontar SMB ni instalar dependencias globales para probarlo.
+
 ### Monitor de alertas
 
 Después del merge y despliegue Git, instalar las dos unidades de `scripts/ops/`
