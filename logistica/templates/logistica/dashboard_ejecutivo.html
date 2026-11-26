@@ -5,7 +5,7 @@
 {% block page_title %}Logística · Dashboard ejecutivo{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-dashboard-ejecutivo.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/logistica-templates-logistica-dashboard-ejecutivo.css?v=20261126-vencimientos">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260621-button-gap-v1">
 {% endblock %}
 
@@ -17,6 +17,18 @@
     {% endfor %}
   </section>
 
+  <section class="card exec-notice {% if avisos_vencimiento.motivo %}exec-notice-warning{% endif %}" aria-labelledby="avisos-vencimiento-title">
+    <h2 id="avisos-vencimiento-title">Avisos de vencimiento</h2>
+    {% if avisos_vencimiento.motivo %}
+      <p role="alert"><strong>Requieren atención.</strong> {{ avisos_vencimiento.mensaje }}</p>
+    {% else %}
+      <p>La última revisión terminó sin avisos pendientes de aceptación por el servicio de correo. Esto no confirma su entrega al destinatario.</p>
+    {% endif %}
+    <p>Destinatarios institucionales{% if avisos_vencimiento.respaldo %} · respaldo de Dirección{% endif %}: <strong>{{ avisos_vencimiento.destinatarios|join:", "|default:"Sin destinatarios válidos" }}</strong></p>
+    <p>Último intento de revisión: <strong>{{ avisos_vencimiento.ultima_ejecucion|date:"d/m/Y H:i"|default:"Sin registro" }}</strong>.
+      {{ avisos_vencimiento.pendientes }} avisos pendientes{% if avisos_vencimiento.inciertos %}; {{ avisos_vencimiento.inciertos }} con resultado incierto{% endif %}.</p>
+  </section>
+
   <section class="exec-kpis">
     <article class="exec-kpi"><span>Tickets abiertos</span><strong>{{ tickets_abiertos|intcomma }}</strong><small>Casos pendientes de atención.</small></article>
     <article class="exec-kpi"><span>Críticos activos</span><strong>{{ tickets_criticos|intcomma }}</strong><small>Abiertos o en proceso.</small></article>
@@ -25,7 +37,7 @@
   </section>
 
   <section class="exec-kpis secondary">
-    <article class="exec-kpi"><span>Documentos por vencer</span><strong>{{ documentos_por_vencer|intcomma }}</strong><small>Próximos 30 días.</small></article>
+    <article class="exec-kpi"><span>Licencias y documentos</span><strong>{{ documentos_por_vencer|intcomma }}</strong><small>Por vencer, vencidos o sin fecha.</small></article>
     <article class="exec-kpi"><span>Servicios próximos</span><strong>{{ servicios_proximos|intcomma }}</strong><small>Próximos 30 días.</small></article>
     <article class="exec-kpi"><span>Unidades activas</span><strong>{{ unidades_activas|intcomma }}</strong><small>Flota operativa.</small></article>
   </section>
@@ -76,20 +88,19 @@
 
   <section class="exec-grid">
     <article class="card">
-      <div class="exec-card-head"><h2>Documentos por vencer</h2><a class="btn btn-secondary btn-small" href="{% url 'logistica:flota_resumen' %}">Ver flota</a></div>
+      <div class="exec-card-head"><h2>Licencias y documentos que requieren atención</h2><a class="btn btn-secondary btn-small" href="{% url 'logistica:flota_resumen' %}">Ver flota</a></div>
       <div class="table-responsive">
         <table class="table table-striped">
-          <thead><tr><th>Unidad</th><th>Documento</th><th>Vence</th><th>Días</th></tr></thead>
+          <thead><tr><th>Licencia o documento</th><th>Vencimiento</th><th>Situación</th></tr></thead>
           <tbody>
-            {% for documento in documentos_criticos %}
+            {% for evento in avisos_vencimiento.eventos %}
             <tr>
-              <td><strong>{{ documento.unidad.codigo }}</strong></td>
-              <td>{{ documento.get_tipo_display }}</td>
-              <td>{{ documento.fecha_vencimiento|date:"d/m/Y" }}</td>
-              <td><span class="exec-badge {% if documento.dias_restantes <= 15 %}danger{% else %}warn{% endif %}">{{ documento.dias_restantes }} días</span></td>
+              <td><strong>{{ evento.titulo }}</strong></td>
+              <td>{{ evento.fecha_vencimiento|date:"d/m/Y"|default:"Sin fecha registrada" }}</td>
+              <td>{{ evento.estado }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="4"><div class="exec-empty">No hay documentos por vencer en los próximos 30 días.</div></td></tr>
+            <tr><td colspan="3"><div class="exec-empty">No hay licencias ni documentos pendientes dentro del periodo de aviso.</div></td></tr>
             {% endfor %}
           </tbody>
         </table>

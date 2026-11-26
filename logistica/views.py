@@ -3296,6 +3296,10 @@ def dashboard_ejecutivo(request):
     if not _can_view_logistica_ejecutivo(request.user):
         raise PermissionDenied("No tienes permisos para ver el dashboard ejecutivo de Logística")
 
+    from .services_vencimientos import resumen_avisos_vencimiento
+
+    avisos_vencimiento = resumen_avisos_vencimiento()
+
     today = timezone.localdate()
     limite_30 = today + timedelta(days=30)
     checklist_fields = [
@@ -3317,12 +3321,6 @@ def dashboard_ejecutivo(request):
         if len(inspecciones_recientes) >= 5:
             break
 
-    documentos_criticos = []
-    for documento in DocumentoUnidad.objects.select_related("unidad").filter(
-        vigente=True,
-        fecha_vencimiento__lte=limite_30,
-    ).order_by("fecha_vencimiento", "unidad__codigo"):
-        documentos_criticos.append(_decorate_documento(documento))
     turnos_sin_cerrar = list(
         BitacoraSalidaLlegada.objects.select_related("unidad", "repartidor__user")
         .filter(cerrada=False)
@@ -3342,7 +3340,8 @@ def dashboard_ejecutivo(request):
         ).count(),
         "turnos_abiertos": BitacoraSalidaLlegada.objects.filter(cerrada=False).count(),
         "unidades_activas": Unidad.objects.filter(activa=True).count(),
-        "documentos_por_vencer": DocumentoUnidad.objects.filter(vigente=True, fecha_vencimiento__lte=limite_30).count(),
+        "documentos_por_vencer": len(avisos_vencimiento["eventos"]),
+        "avisos_vencimiento": avisos_vencimiento,
         "servicios_proximos": ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__lte=limite_30).count(),
         "gasto_mes": ReparacionUnidad.objects.filter(
             fecha_ingreso__month=today.month,
@@ -3353,7 +3352,6 @@ def dashboard_ejecutivo(request):
             "-fecha_reporte"
         )[:10],
         "turnos_sin_cerrar": turnos_sin_cerrar,
-        "documentos_criticos": documentos_criticos,
         "inspecciones_recientes": inspecciones_recientes,
     }
     return render(request, "logistica/dashboard_ejecutivo.html", context)

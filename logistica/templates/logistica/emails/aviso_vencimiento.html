@@ -1,0 +1,14 @@
+{% extends "logistica/emails/base.html" %}
+{% block title %}{{ evento.titulo }}{% endblock %}
+{% block kicker %}Vencimientos · Pollyana's Dolce{% endblock %}
+{% block content %}
+<p class="pd-email-copy pd-email-copy--priority"><strong>{{ evento.titulo }}</strong></p>
+<p class="pd-email-copy">{{ evento.estado }}.</p>
+{% if evento.fecha_vencimiento %}
+<p class="pd-email-copy">Vencimiento registrado: <strong>{{ evento.fecha_vencimiento|date:"d/m/Y" }}</strong>.</p>
+{% else %}
+<p class="pd-email-copy">Falta registrar la fecha de vencimiento de la licencia. Revisa el expediente del conductor.</p>
+{% endif %}
+<p class="pd-email-copy">Revisa la renovación o la captura del documento. Este aviso usa el registro actual del ERP.</p>
+<a href="https://erp.pollyanasdolce.com/logistica/ejecutivo/" class="pd-email-button">Revisar vencimientos</a>
+{% endblock %}

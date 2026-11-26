@@ -1,5 +1,10 @@
 /* Extracted from logistica/templates/logistica/dashboard_ejecutivo.html */
 .exec-shell { display: grid; gap: 18px; }
+.exec-notice { overflow-wrap: anywhere; }
+.exec-notice h2 { margin-top: 0; }
+/* El tema compartido fija las tarjetas con !important; conservar la señal de alerta. */
+.exec-shell .card.exec-notice-warning { background: #fff4d8 !important; color: #6b3500 !important; border-color: #a46b21 !important; }
+.exec-shell .card.exec-notice-warning h2 { color: #6b3500 !important; }
   .exec-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
   .exec-kpis.secondary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .exec-kpi { background: #fff; border: 1px solid #efc7d8; border-radius: 14px; padding: 16px; box-shadow: 0 12px 28px rgba(139,34,82,.07); }

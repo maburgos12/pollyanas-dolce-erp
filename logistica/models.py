@@ -1574,6 +1574,8 @@ class ConfigAlertaFlota(models.Model):
     dias_anticipacion_1 = models.PositiveIntegerField(default=30)
     dias_anticipacion_2 = models.PositiveIntegerField(default=15)
     dias_anticipacion_3 = models.PositiveIntegerField(default=0)
+    ultima_ejecucion = models.DateTimeField(null=True, blank=True, editable=False)
+    ultimo_resultado = models.JSONField(default=dict, blank=True, editable=False)
 
     class Meta:
         ordering = ["tipo"]
@@ -1582,6 +1584,30 @@ class ConfigAlertaFlota(models.Model):
 
     def __str__(self) -> str:
         return self.get_tipo_display()
+
+
+class AvisoVencimientoFlota(models.Model):
+    """Bitácora de transporte; aceptado no acredita entrega al destinatario."""
+
+    clave = models.CharField(max_length=64, unique=True)
+    fuente = models.CharField(max_length=20, choices=[("licencia", "Licencia"), ("documento", "Documento de unidad")])
+    objeto_id = models.PositiveBigIntegerField()
+    fecha_vencimiento = models.DateField(null=True, blank=True)
+    umbral = models.PositiveIntegerField()
+    destinatario = models.EmailField()
+    estado_envio = models.CharField(max_length=20, default="pendiente", db_index=True, choices=[
+        ("pendiente", "Pendiente"), ("enviando", "En proceso"),
+        ("aceptado", "Aceptado por correo"), ("fallido", "Fallido"),
+        ("incierto", "Resultado incierto; revisar proveedor"),
+    ])
+    intentos = models.PositiveIntegerField(default=0)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    aceptado_en = models.DateTimeField(null=True, blank=True)
+    error = models.CharField(max_length=80, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Aviso de vencimiento de flota"
+        verbose_name_plural = "Avisos de vencimiento de flota"
 
 
 class EntregaEcommerce(models.Model):

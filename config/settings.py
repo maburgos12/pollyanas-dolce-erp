@@ -507,6 +507,9 @@ EMAIL_BACKEND = os.getenv(
 )
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "webmaster@localhost")
 DIRECTOR_EMAIL = os.getenv("DIRECTOR_EMAIL", DEFAULT_FROM_EMAIL)
+LOGISTICA_VENCIMIENTOS_DESTINATARIOS = env_list(
+    "LOGISTICA_VENCIMIENTOS_DESTINATARIOS", "maburgos12@pollyanasdolce.com"
+)
 CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS = [
     email.strip()
     for email in os.getenv("CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS", "").split(",")

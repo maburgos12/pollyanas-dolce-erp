@@ -21,7 +21,6 @@ from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     ConfigAlertaFlota,
-    DocumentoUnidad,
     EventoRuta,
     LavadoUnidad,
     ReporteUnidad,
@@ -496,47 +495,9 @@ def _dias_configurados(config: ConfigAlertaFlota) -> list[int]:
 
 @shared_task
 def alertar_documentos_por_vencer():
-    config = _config_alerta("documento_vencimiento")
-    if not config:
-        return {"enviadas": 0, "vencidos_marcados": 0, "motivo": "config_no_activa"}
+    from .services_vencimientos import procesar_avisos_vencimiento
 
-    hoy = timezone.localdate()
-    emails = _emails_de_usuarios(config.destinatarios.all())
-    enviadas = 0
-
-    if emails:
-        for dias in _dias_configurados(config):
-            fecha_objetivo = hoy + timedelta(days=dias)
-            documentos = DocumentoUnidad.objects.select_related("unidad").filter(
-                fecha_vencimiento=fecha_objetivo,
-                vigente=True,
-            )
-            for documento in documentos:
-                html_message = render_email_to_string(
-                    "logistica/emails/alerta_documento.html",
-                    {
-                        "documento": documento,
-                        "dias_restantes": dias,
-                        "unidad": documento.unidad,
-                    },
-                )
-                subject = (
-                    f"VENCE HOY - {documento.unidad.codigo} · {documento.get_tipo_display()}"
-                    if dias == 0
-                    else f"Documento por vencer - {documento.unidad.codigo} · {documento.get_tipo_display()} · {dias} días"
-                )
-                send_mail(
-                    subject=subject,
-                    message=strip_tags(html_message),
-                    from_email=_from_email(),
-                    recipient_list=emails,
-                    html_message=html_message,
-                    fail_silently=False,
-                )
-                enviadas += 1
-
-    vencidos_marcados = DocumentoUnidad.objects.filter(fecha_vencimiento__lt=hoy, vigente=True).update(vigente=False)
-    return {"enviadas": enviadas, "vencidos_marcados": vencidos_marcados}
+    return procesar_avisos_vencimiento()
 
 
 @shared_task
