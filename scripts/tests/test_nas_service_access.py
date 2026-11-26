@@ -17,6 +17,43 @@ nas = module('nas_restore_daily')
 
 
 class ServiceCommandTests(unittest.TestCase):
+    def test_verify_local_checks_exact_payload_and_media_hashes(self):
+        point = 'backup_20261123_020001'
+        with tempfile.TemporaryDirectory() as tmp, patch.object(nas, 'NAS', Path(tmp)), patch.object(nas, 'HOME', Path(tmp)):
+            root = Path(tmp)
+            media = root / 'ERP_ACTIVE_MEDIA_VERSIONS/ERP medios activos - 7 versiones/latest/ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING'
+            media.mkdir(parents=True)
+            (media / 'test.txt').write_bytes(b'media')
+            rows = []
+            for suffix in nas.SUFFIXES:
+                path = root / (point + '.' + suffix)
+                path.write_bytes(json.dumps({'version': 1, 'files': [
+                    {'path': 'test.txt', 'bytes': 5, 'sha256': hashlib.sha256(b'media').hexdigest()}
+                ]}).encode() if suffix == 'media.json' else b'payload')
+                rows.append(f'{nas.sha(path)}  {path.name}\n')
+            manifest = root / (point + '.manifest')
+            manifest.write_text(''.join(rows))
+            checksum = nas.sha(manifest)
+            command = f'verify-local {point} {checksum} latest'
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), patch.object(nas, 'restore') as restore:
+                nas.ssh_command(command)
+            restore.assert_not_called()
+            self.assertEqual(json.loads(output.getvalue()), {
+                'version': 1, 'state': 'VERIFIED', 'point': point,
+                'manifest_sha256': checksum, 'generation': 'latest', 'media': 1,
+            })
+            (media / 'test.txt').write_bytes(b'other')
+            with self.assertRaises(ValueError):
+                nas.ssh_command(command)
+            for suffix in (' ../private', ' latest extra', ' bogus'):
+                with self.assertRaises(ValueError):
+                    nas.ssh_command(f'verify-local {point} {checksum}' + suffix)
+            (media / 'test.txt').write_bytes(b'media')
+            (root / (point + '.sql.gz')).write_bytes(b'changed')
+            with self.assertRaises(ValueError):
+                nas.ssh_command(command)
+
     def test_status_exposes_no_secret_or_arbitrary_file(self):
         output = io.StringIO()
         command = getattr(nas, 'ssh_command', None)
