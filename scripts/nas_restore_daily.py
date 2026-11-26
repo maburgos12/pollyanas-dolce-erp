@@ -142,8 +142,10 @@ def media_sources(point, generation='latest', checksum=None):
     inventory = json.loads(raw)
     require(inventory['version'] == 1, 'Unsupported media inventory')
     versions = NAS / 'ERP_ACTIVE_MEDIA_VERSIONS/ERP medios activos - 7 versiones'
-    source = (versions / generation / 'ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING').resolve(strict=True)
+    pointer = versions / generation / 'ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING'
+    source = pointer.resolve(strict=True)
     require(source.is_relative_to(versions.resolve()), 'Unsafe generation')
+    identity = source.stat()
     seen = set()
     for row in inventory['files']:
         name = str(relative(row['path']))
@@ -152,6 +154,9 @@ def media_sources(point, generation='latest', checksum=None):
         require(original.resolve().is_relative_to(source) and original.is_file(), 'Missing/unsafe media')
         seen.add(name)
         yield row, original
+    final = pointer.stat()
+    require(pointer.resolve(strict=True) == source and (final.st_dev, final.st_ino) == (identity.st_dev, identity.st_ino),
+            'NAS media generation changed')
 
 
 def verify_local(point, expected, generation):

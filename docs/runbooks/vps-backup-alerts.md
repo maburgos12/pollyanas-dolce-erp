@@ -354,7 +354,8 @@ identidad única, origen privado y ausencia de autenticación por contraseña,
 agente, TTY y forwarding. No hereda claves de los `Host *` del administrador.
 
 El NAS fuerza `nas_restore_daily.py --ssh-command`; sólo admite `status`,
-`preflight PUNTO SHA256` o `restore PUNTO SHA256`. El estado READY prueba el
+`preflight PUNTO SHA256`, `restore PUNTO SHA256` o
+`verify-local PUNTO SHA256 GENERACION`. El estado READY prueba el
 acceso, no recuperación. El preflight abre todos los medios antes del SQL; el
 recibo completo conserva restauración SQL, medios, hashes y cierre del scratch.
 Los comandos arbitrarios y la instalación quedan fuera de esa clave.
