@@ -5,7 +5,7 @@
 {% block extra_css %}<link rel="stylesheet" href="{% static 'css/clima.css' %}">{% endblock %}
 {% block content %}
 <div class="clima-page">
-  <p class="clima-intro">Prepara una encuesta con el cuestionario acordado y una selección del padrón de RR. HH. Las campañas creadas aquí permanecen cerradas: cada persona tiene liga y QR, pero no se aceptan respuestas ni se envían invitaciones hasta una apertura posterior.</p>
+  <p class="clima-intro">Crea la campaña con el padrón de RR. HH. Las campañas nuevas comienzan en borrador; al abrirlas aceptan respuestas y el envío de WhatsApp requiere un paso aparte.</p>
   <section class="clima-section" aria-labelledby="cobertura"><h2 id="cobertura">Cobertura del padrón actual</h2>
     <p>{{ cobertura.listos }} de {{ cobertura.total }} personas tienen un contacto personal con formato utilizable que no aparece compartido en este padrón. {{ cobertura.sin_contacto }} {% if cobertura.sin_contacto == 1 %}no tiene{% else %}no tienen{% endif %} contacto utilizable y {{ cobertura.compartidos }} {% if cobertura.compartidos == 1 %}comparte{% else %}comparten{% endif %} correo o teléfono con otra persona. Estos grupos pueden coincidir.</p>
     <p>El formato no confirma que el correo o teléfono pertenezca a la persona. Esta revisión no envía mensajes ni abre encuestas.</p>
@@ -34,8 +34,8 @@
     <p>23 preguntas de escala y 3 abiertas. El departamento se tomará del padrón, sin pedirlo de nuevo.</p>
     {% for seccion in cuestionario.sections %}<details class="clima-questions"><summary>{{ seccion.title }} · {{ seccion.questions|length }} preguntas</summary><ol>{% for pregunta in seccion.questions %}<li>{{ pregunta.text }} <span>{% if pregunta.type == 'text' %}Respuesta abierta{% else %}Opciones: {{ pregunta.options|join:" · " }}{% endif %}</span></li>{% endfor %}</ol></details>{% endfor %}
   </section>
-  <section class="clima-section" aria-labelledby="campanas"><h2 id="campanas">Campañas en borrador</h2>
-    {% if campanas %}<ul class="clima-campanas">{% for campana in campanas %}<li><a href="{% url 'rrhh:clima_detalle' campana.pk %}">{{ campana.titulo }}</a><span>{{ campana.total }} personas · fecha prevista {{ campana.fecha_cierre|date:"d/m/Y" }}</span></li>{% endfor %}</ul>{% else %}<p>Aún no hay campañas preparadas.</p>{% endif %}
+  <section class="clima-section" aria-labelledby="campanas"><h2 id="campanas">Campañas</h2>
+    {% if campanas %}<ul class="clima-campanas">{% for campana in campanas %}<li><a href="{% url 'rrhh:clima_detalle' campana.pk %}">{{ campana.titulo }}</a><span>{% if campana.recepcion_habilitada %}{% if campana.fecha_cierre < hoy %}Vencida{% else %}Activa{% endif %}{% elif campana.abierta_en %}Cerrada{% else %}Borrador{% endif %} · {{ campana.total }} personas · límite {{ campana.fecha_cierre|date:"d/m/Y" }}</span></li>{% endfor %}</ul>{% else %}<p>Aún no hay campañas preparadas.</p>{% endif %}
   </section>
 </div>
 {% endblock %}
