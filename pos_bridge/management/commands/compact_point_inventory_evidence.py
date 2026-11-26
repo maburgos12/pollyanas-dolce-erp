@@ -7,7 +7,7 @@ from django.db import connection, models, transaction
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from pos_bridge.models import PointInventorySnapshot
+from pos_bridge.models.snapshot import PointInventoryCutStorage
 from pos_bridge.services.inventory_payload_store import store_exact_inventory_payloads
 from pos_bridge.utils.exceptions import PersistenceError
 
@@ -31,7 +31,7 @@ class Command(BaseCommand):
         begin = datetime.combine(day, time.min, mazatlan)
         end = datetime.combine(day + timedelta(days=1), time.min, mazatlan)
         query = (
-            PointInventorySnapshot.objects.filter(
+            PointInventoryCutStorage.objects.filter(
                 captured_at__gte=begin, captured_at__lt=end, pk__gt=after_id, shared_payload__isnull=True,
             )
             .exclude(raw_payload={})
@@ -50,7 +50,7 @@ class Command(BaseCommand):
                         ids, documents = map(list, zip(*batch, strict=True))
                         payload_ids = store_exact_inventory_payloads(documents)
                         cursor.execute("""
-                            UPDATE pos_bridge_inventory_snapshots s
+                            UPDATE pos_bridge_inventory_cuts s
                             SET shared_payload_id = d.id, raw_payload = '{}'::jsonb
                             FROM unnest(%s::bigint[], %s::bigint[]) AS changes(snapshot_id, payload_id)
                             JOIN pos_bridge_inventory_payloads d ON d.id = changes.payload_id

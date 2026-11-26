@@ -53,3 +53,33 @@ La compactacion comparte documentos, no fusiona saldos ni cortes. PostgreSQL
 puede reutilizar paginas al aspirar las versiones antiguas; eso no equivale a
 liberar el mismo espacio en el VPS. No ejecutar `VACUUM FULL` ni una reescritura
 de la tabla como parte de estos lotes.
+
+## Saldos por dia sin duplicar cortes
+
+La clave de un saldo es el dia operativo de Mazatlan, los IDs Point de sucursal
+y producto, y las cantidades exactas de saldo, minimo y maximo. Los cortes
+siguen teniendo sus IDs, horas y trabajos originales. La vista compatible
+resuelve sus cantidades desde el estado diario o desde las columnas historicas
+si aun no se compactaron. Las escrituras nuevas crean o reutilizan el estado
+desde PostgreSQL; un cambio de sucursal, producto o dia no comparte saldo.
+
+La migracion conserva los indices y la secuencia de corte, sin copiar el
+historico ni reescribir la tabla. Aplicarla solo despues de verificar una
+restauracion NAS y comprobar el flujo de captura y lectura. Validar el plan y
+la latencia de los consumidores sobre copias representativas antes del cambio.
+No volver a ejecutar migraciones antiguas que traten la vista como tabla.
+
+Tras el despliegue, revisar un lote de dia cerrado y aplicar el mismo comando
+solo con el respaldo validado:
+
+```text
+manage.py compact_point_inventory_balances YYYY-MM-DD --batch-size 500
+manage.py compact_point_inventory_balances YYYY-MM-DD --batch-size 500 --max-batches 50 --apply
+manage.py compact_point_inventory_balances YYYY-MM-DD --batch-size 500 --max-batches 50 --after-id ID --apply
+```
+
+Cada lote confirma por separado antes de imprimir su cursor. Repetir hasta
+`selected=0` y confirmar desde el inicio del dia. La comparacion
+de cada lote conserva las cantidades, IDs, horas, trabajos y referencias de
+evidencia; un fallo revierte el lote entero. Medir espacio recuperable aparte;
+esta operacion no usa `VACUUM FULL`, no retira respaldos y no reinicia el VPS.
