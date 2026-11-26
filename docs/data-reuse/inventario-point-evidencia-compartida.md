@@ -31,3 +31,25 @@ ni cambia la rotacion de respaldos.
 Para medir el ahorro, comparar muestras de volumen y repeticion de los
 documentos y el crecimiento real de tablas e indices; no contar
 observaciones conservadas como espacio liberado.
+
+## Historico de evidencia
+
+Despues de validar los lectores, activar el escritor y comprobar un respaldo
+restaurable del historico, ejecutar por dia cerrado de Mazatlan:
+
+```text
+manage.py compact_point_inventory_evidence YYYY-MM-DD --batch-size 500
+manage.py compact_point_inventory_evidence YYYY-MM-DD --batch-size 500 --apply
+manage.py compact_point_inventory_evidence YYYY-MM-DD --batch-size 500 --after-id ID --apply
+```
+
+La primera llamada no escribe. Cada llamada aplica un solo lote atomico y
+devuelve `next_id` para el siguiente. Un dia se da por terminado al recibir
+`selected=0` y volver a comprobar desde el inicio. Si hay bloqueo, diferencia
+de contenido o error, no avanzar el cursor. Se compara el JSON original sin
+redondear numeros ni devolver la evidencia a Python para serializarla.
+
+La compactacion comparte documentos, no fusiona saldos ni cortes. PostgreSQL
+puede reutilizar paginas al aspirar las versiones antiguas; eso no equivale a
+liberar el mismo espacio en el VPS. No ejecutar `VACUUM FULL` ni una reescritura
+de la tabla como parte de estos lotes.
