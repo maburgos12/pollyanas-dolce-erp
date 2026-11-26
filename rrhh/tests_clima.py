@@ -378,6 +378,22 @@ class ControlCampanaClimaTests(TestCase):
     def accion(self, accion, **datos):
         return self.client.post(self.url, {"accion": accion, **datos}, HTTP_ACCEPT="application/json")
 
+    def test_detalle_muestra_solo_casos_pendientes_y_oculta_resto(self):
+        pendiente = Empleado.objects.create(nombre="Pendiente de autorización", telefono="6672223344")
+        corregir = Empleado.objects.create(nombre="Contacto por corregir", telefono="")
+        ParticipanteClima.objects.create(campana=self.campana, empleado=pendiente, nombre=pendiente.nombre)
+        ParticipanteClima.objects.create(campana=self.campana, empleado=corregir, nombre=corregir.nombre)
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        respuesta = self.client.get(reverse("rrhh:clima_detalle", args=[self.campana.pk]))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual([p.nombre for p in respuesta.context["pendientes_autorizacion"]], [pendiente.nombre])
+        self.assertEqual([p.nombre for p in respuesta.context["contactos_por_corregir"]], [corregir.nombre])
+        self.assertEqual([p.nombre for p in respuesta.context["otros_participantes"]], [self.persona.nombre])
+        self.assertContains(respuesta, "Por autorizar (1)")
+        self.assertContains(respuesta, "Contactos por corregir (1)")
+        self.assertContains(respuesta, "Ver la otra persona de la campaña")
+        self.assertEqual(respuesta.content.decode().count(self.persona.nombre), 1)
+
     def test_padron_borrador_se_corrige_solo_antes_de_autorizar(self):
         nueva = Empleado.objects.create(nombre="Nueva persona", telefono="6671112233")
         self.assertEqual(self.accion("padron", empleados=[str(nueva.pk)]).status_code, 200)
