@@ -389,6 +389,48 @@ class ControlCampanaClimaTests(TestCase):
         self.assertEqual(self.accion("autorizar", participante_id=incluida.pk, titularidad_confirmada="si").status_code, 200)
         self.assertEqual(self.accion("padron", empleados=[str(self.empleado.pk)]).status_code, 400)
 
+    def test_autorizar_lote_solo_incluidas_aptas_sin_abrir_ni_enviar(self):
+        segunda = Empleado.objects.create(nombre="Segunda persona", telefono="6672223344")
+        sin_contacto = Empleado.objects.create(nombre="Sin contacto", telefono="")
+        no_incluida = Empleado.objects.create(nombre="Fuera de campaña", telefono="6674445566")
+        incluida = ParticipanteClima.objects.create(campana=self.campana, empleado=segunda, nombre=segunda.nombre)
+        excluida = ParticipanteClima.objects.create(campana=self.campana, empleado=sin_contacto, nombre=sin_contacto.nombre)
+        self.assertEqual(self.accion("autorizar_lote").status_code, 400)
+        self.assertEqual(self.accion("autorizar_lote", titularidad_confirmada="si").status_code, 200)
+        self.persona.refresh_from_db()
+        incluida.refresh_from_db()
+        excluida.refresh_from_db()
+        self.assertTrue(self.persona.envio_whatsapp_autorizado)
+        self.assertTrue(incluida.envio_whatsapp_autorizado)
+        self.assertEqual(incluida.autorizado_por, self.admin)
+        self.assertEqual(incluida.telefono_autorizado_digest, digest_telefono("526672223344"))
+        self.assertFalse(excluida.envio_whatsapp_autorizado)
+        self.assertFalse(self.campana.participantes.filter(empleado=no_incluida).exists())
+        self.assertEqual(EventoCampanaClima.objects.get(campana=self.campana).accion, "AUTORIZAR_LOTE")
+        self.campana.refresh_from_db()
+        self.assertFalse(self.campana.recepcion_habilitada)
+        self.assertIsNone(self.campana.envio_solicitado_en)
+        self.assertEqual(AvisoClima.objects.filter(participante__campana=self.campana).count(), 0)
+
+    def test_autorizar_lote_revalida_telefono_y_respeta_envio_solicitado(self):
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        anterior = self.persona.telefono_autorizado_digest
+        self.empleado.telefono = "6677654321"
+        self.empleado.save(update_fields=["telefono"])
+        self.assertEqual(self.accion("autorizar_lote", titularidad_confirmada="si").status_code, 200)
+        self.persona.refresh_from_db()
+        self.assertNotEqual(self.persona.telefono_autorizado_digest, anterior)
+        self.campana.envio_solicitado_en = timezone.now()
+        self.campana.save(update_fields=["envio_solicitado_en"])
+        self.assertEqual(self.accion("autorizar_lote", titularidad_confirmada="si").status_code, 400)
+
+    def test_autorizar_lote_excluye_telefonos_compartidos(self):
+        duplicada = Empleado.objects.create(nombre="Comparte teléfono", telefono="6671234567")
+        otra = ParticipanteClima.objects.create(campana=self.campana, empleado=duplicada, nombre=duplicada.nombre)
+        self.assertEqual(self.accion("autorizar_lote", titularidad_confirmada="si").status_code, 400)
+        self.assertFalse(ParticipanteClima.objects.get(pk=self.persona.pk).envio_whatsapp_autorizado)
+        self.assertFalse(ParticipanteClima.objects.get(pk=otra.pk).envio_whatsapp_autorizado)
+
     def test_orden_autorizacion_apertura_envio_y_auditoria(self):
         self.assertEqual(self.accion("abrir").status_code, 400)
         self.assertEqual(self.accion("autorizar", participante_id=self.persona.pk).status_code, 400)
@@ -462,4 +504,5 @@ class ControlCampanaClimaTests(TestCase):
         otro = get_user_model().objects.create_user("clima_lector", password="pass")
         self.client.force_login(otro)
         self.assertEqual(self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si").status_code, 403)
+        self.assertEqual(self.accion("autorizar_lote", titularidad_confirmada="si").status_code, 403)
         self.assertFalse(ParticipanteClima.objects.get(pk=self.persona.pk).envio_whatsapp_autorizado)
