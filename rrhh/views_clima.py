@@ -175,9 +175,13 @@ def detalle_clima(request, pk):
         empleado["incluido"] = empleado["id"] in seleccionados
     autorizados = sum(p.autorizacion_vigente for p in participantes if not p.respondio)
     whatsapp_listos = sum(p.whatsapp_listo for p in participantes if not p.respondio)
-    lote_autorizables = sum(p.whatsapp_listo and not p.autorizacion_vigente and not p.respondio
-                           and not p.aviso_invitacion for p in participantes)
-    lote_revisar = sum(not p.whatsapp_listo and not p.respondio for p in participantes)
+    pendientes_autorizacion = [p for p in participantes if p.whatsapp_listo and not p.autorizacion_vigente
+                               and not p.respondio and not p.aviso_invitacion]
+    contactos_por_corregir = [p for p in participantes if not p.whatsapp_listo and not p.respondio]
+    casos_visibles = {p.pk for p in pendientes_autorizacion + contactos_por_corregir}
+    otros_participantes = [p for p in participantes if p.pk not in casos_visibles]
+    lote_autorizables = len(pendientes_autorizacion)
+    lote_revisar = len(contactos_por_corregir)
     avisos_resumen = Counter(a.estado for a in avisos.values())
     entrega_resumen = Counter(a.entrega_estado for a in avisos.values() if a.estado == "ENVIADO")
     sin_intento = sum(p.autorizacion_vigente and not p.respondio and p.pk not in avisos for p in participantes)
@@ -218,7 +222,11 @@ def detalle_clima(request, pk):
         "whatsapp_listos": whatsapp_listos,
         "lote_autorizables": lote_autorizables,
         "lote_revisar": lote_revisar,
+        "pendientes_autorizacion": pendientes_autorizacion,
+        "contactos_por_corregir": contactos_por_corregir,
+        "otros_participantes": otros_participantes,
         "avisos_resumen": avisos_resumen,
+        "invitaciones_intentadas": len(avisos),
         "entrega_resumen": entrega_resumen,
         "webhook_configurado": bool(os.getenv("META_APP_SECRET") and os.getenv("CLIMA_META_WEBHOOK_VERIFY_TOKEN")
                                     and os.getenv("META_WHATSAPP_PHONE_NUMBER_ID")),
