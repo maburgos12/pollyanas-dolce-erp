@@ -76,6 +76,47 @@ class RetirePointTests(unittest.TestCase):
 
 
 class BoundedNASProofTests(unittest.TestCase):
+    def test_direct_probe_does_not_open_kernel_mount_or_enable_bulk_retirement(self):
+        point = 'backup_20261122_020001'
+        request = dict(root='/local', nas='/mounted-share', stem=point, proof={},
+                       nas_side=True, smb_direct=True)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(r, 'PROBE_LOCK', Path(tmp) / 'lock'), \
+                patch.object(r, 'actual_nas_device') as mounted, \
+                patch.object(r, 'check_nas_side', return_value=('manifest', {}, 'latest')) as verifier:
+            self.assertEqual(r.probe(request)['result'], ('manifest', {}, 'latest'))
+            mounted.assert_not_called()
+            verifier.assert_called_once_with(Path('/local'), Path('/mounted-share'), point, {}, None,
+                                             smb_direct=True)
+        result = subprocess.run([sys.executable, r.__file__, '--apply', '--nas-side', '--smb-direct'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_direct_mode_fails_closed_when_smb_changes_or_loses_a_payload(self):
+        from types import SimpleNamespace
+
+        stem = 'backup_20261122_020001'
+        manifest, name = stem + '.manifest', stem + '.sql.gz'
+        checksum = 'a' * 64
+        proof = {'manifest_sha256': checksum, 'verified_media': 3078, 'media_generations': ['latest']}
+        result = dict(version=1, state='VERIFIED', point=stem, manifest_sha256=checksum,
+                      generation='latest', media=3078)
+        reader = Mock()
+        with patch.dict(sys.modules, {'nas_smb_direct': SimpleNamespace(DirectSMBReader=lambda: reader)}), \
+                patch.object(r, 'local_set', return_value=(manifest, checksum, {name: 'b' * 64})), \
+                patch.object(r.subprocess, 'check_output', return_value=json.dumps(result)) as ssh:
+            reader.digest_manifest.side_effect = [checksum, 'c' * 64]
+            reader.readable.return_value = True
+            with self.assertRaisesRegex(ValueError, 'cambió'):
+                r.check_nas_side(Path('/local'), Path('/mounted'), stem, proof, None, smb_direct=True)
+            reader.readable.assert_called_once_with(name)
+            ssh.reset_mock()
+            reader.digest_manifest.side_effect = None
+            reader.digest_manifest.return_value = checksum
+            reader.readable.return_value = False
+            with self.assertRaisesRegex(ValueError, 'inaccesible'):
+                r.check_nas_side(Path('/local'), Path('/mounted'), stem, proof, None, smb_direct=True)
+            ssh.assert_not_called()
+
     def test_nas_side_does_not_enable_bulk_retirement(self):
         result = subprocess.run([sys.executable, r.__file__, '--apply', '--nas-side'],
                                 capture_output=True, text=True)

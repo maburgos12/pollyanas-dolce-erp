@@ -23,6 +23,7 @@ NAS = Path('/opt/pastelerias-erp/storage/nas/compartidos/erp_backups')
 NAS_SOURCE = '//10.77.216.2/ERP_BACKUPS'
 NAS_CONFIG = '/etc/erp-nas-access/ssh_config'
 NAS_ALIAS = 'qnap-nasdolce-verify'
+SMB_DIRECT_ENV = Path('/opt/erp-backup-smb-direct')
 VERSIONS = Path('ERP_ACTIVE_MEDIA_VERSIONS/ERP medios activos - 7 versiones')
 POINT = re.compile(r'backup_[0-9]{8}_[0-9]{6}')
 GENERATION = re.compile(r'latest|[0-9]{12}\.Q')
@@ -148,15 +149,25 @@ def check_proof(root, nas, stem, proof, nas_device):
             continue
     raise ValueError('los medios verificados ya no coinciden con una generación accesible del NAS')
 
-def check_nas_side(root, nas, stem, proof, nas_device):
+def check_nas_side(root, nas, stem, proof, nas_device, *, smb_direct=False):
     manifest, checksum, payloads = local_set(root, stem)
     require(checksum == proof['manifest_sha256'], 'prueba corresponde a otro manifiesto')
-    require(digest(nas / manifest, nas_device) == checksum, 'manifiesto NAS distinto por SMB')
-    for name in payloads:
-        with os.fdopen(os.open(nas / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
-            info = os.fstat(stream.fileno())
-            require(stat.S_ISREG(info.st_mode) and info.st_dev == nas_device and stream.read(1),
-                    'carga de respaldo inaccesible por SMB')
+    if smb_direct:
+        from nas_smb_direct import DirectSMBReader
+
+        reader = DirectSMBReader()
+        manifest_digest = lambda: reader.digest_manifest(manifest)
+        require(manifest_digest() == checksum, 'manifiesto NAS distinto por SMB')
+        for name in payloads:
+            require(reader.readable(name), 'carga de respaldo inaccesible por SMB')
+    else:
+        manifest_digest = lambda: digest(nas / manifest, nas_device)
+        require(manifest_digest() == checksum, 'manifiesto NAS distinto por SMB')
+        for name in payloads:
+            with os.fdopen(os.open(nas / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                require(stat.S_ISREG(info.st_mode) and info.st_dev == nas_device and stream.read(1),
+                        'carga de respaldo inaccesible por SMB')
     for generation in proof['media_generations']:
         require(GENERATION.fullmatch(generation), 'generación inválida')
         try:
@@ -174,7 +185,7 @@ def check_nas_side(root, nas, stem, proof, nas_device):
                                    manifest_sha256=checksum, generation=generation,
                                    media=proof['verified_media']),
                 'prueba NAS autenticada no corresponde al punto solicitado')
-        require(digest(nas / manifest, nas_device) == checksum, 'manifiesto cambió por SMB')
+        require(manifest_digest() == checksum, 'manifiesto cambió por SMB')
         return manifest, payloads, generation
     raise ValueError('el NAS no verificó la recuperación en una generación registrada')
 
@@ -186,15 +197,31 @@ def probe(request):
         root, nas = Path(request['root']), Path(request['nas'])
         stem, proof = request['stem'], request['proof']
         require(POINT.fullmatch(stem), 'identificador inválido')
-        checker = check_nas_side if request.get('nas_side') is True else check_proof
-        result = checker(root, nas, stem, proof, actual_nas_device(nas))
+        if request.get('smb_direct') is True:
+            require(request.get('nas_side') is True, 'SMB directo requiere comprobación NAS')
+            result = check_nas_side(root, nas, stem, proof, None, smb_direct=True)
+        else:
+            checker = check_nas_side if request.get('nas_side') is True else check_proof
+            result = checker(root, nas, stem, proof, actual_nas_device(nas))
         return {'request': request, 'result': result}
 
 
-def bounded_check_proof(root, nas, stem, proof, timeout=PROBE_TIMEOUT, *, nas_side=False):
+def bounded_check_proof(root, nas, stem, proof, timeout=PROBE_TIMEOUT, *, nas_side=False, smb_direct=False):
     request = dict(root=str(root), nas=str(nas), stem=stem, proof=proof)
+    command = [sys.executable]
     if nas_side:
         request['nas_side'] = True
+    if smb_direct:
+        require(nas_side, 'SMB directo requiere comprobación NAS')
+        for directory in (SMB_DIRECT_ENV, SMB_DIRECT_ENV / 'bin'):
+            info = directory.lstat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022,
+                    'entorno SMB directo no protegido')
+        secure_file(SMB_DIRECT_ENV / 'pyvenv.cfg')
+        interpreter = SMB_DIRECT_ENV / 'bin/python3'
+        secure_file(interpreter.resolve())
+        command = [str(interpreter), '-E', '-s', '-B']
+        request['smb_direct'] = True
     # Regular local files avoid pipe EOF waits when an unkillable reader survives.
     with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as output:
         source.write(json.dumps(request).encode())
@@ -206,7 +233,7 @@ def bounded_check_proof(root, nas, stem, proof, timeout=PROBE_TIMEOUT, *, nas_si
         previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
         previous_handler = signal.signal(signal.SIGTERM, terminate)
         try:
-            child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--nas-probe'],
+            child = subprocess.Popen(command + [str(Path(__file__).resolve()), '--nas-probe'],
                                      stdin=source, stdout=output, stderr=output,
                                      close_fds=True, start_new_session=True)
             signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
@@ -260,7 +287,7 @@ def retirement_links(root, export, manifest, payloads):
     return links
 
 
-def retire_point(root, export, receipts, nas, stem, *, nas_side=False):
+def retire_point(root, export, receipts, nas, stem, *, nas_side=False, smb_direct=False):
     require(POINT.fullmatch(stem), 'identificador inválido')
     for path in (root, export, receipts):
         info = path.lstat()
@@ -283,6 +310,8 @@ def retire_point(root, export, receipts, nas, stem, *, nas_side=False):
         proof = read_receipt(receipt, stem)
         fcntl.flock(lock, fcntl.LOCK_UN)
         options = {'nas_side': True} if nas_side else {}
+        if smb_direct:
+            options['smb_direct'] = True
         manifest, payloads, generation = bounded_check_proof(root, nas, stem, proof, **options)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         newest = protected_latest()
@@ -344,7 +373,10 @@ def main():
     mode.add_argument('--check-proof')
     mode.add_argument('--nas-probe', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--nas-side', action='store_true', help='Validar integridad en el NAS y acceso independiente por SMB')
+    parser.add_argument('--smb-direct', action='store_true', help='Usar SMB cifrado directo sin activar el montaje')
     args = parser.parse_args()
+    if args.smb_direct and not args.nas_side:
+        parser.error('--smb-direct requiere --nas-side')
     if args.nas_side and not (args.check_proof or args.retire_point):
         parser.error('--nas-side requiere un punto exacto con --check-proof o --retire-point')
     if args.nas_probe:
@@ -354,13 +386,14 @@ def main():
         stem = args.retire_point
         require(POINT.fullmatch(stem), 'identificador inválido')
         receipts = VERIFICATION_RECEIPTS if (VERIFICATION_RECEIPTS / (stem + '.json')).exists() else RECEIPTS
-        retire_point(BACKUPS, EXPORT, receipts, NAS, stem, nas_side=args.nas_side)
+        retire_point(BACKUPS, EXPORT, receipts, NAS, stem, nas_side=args.nas_side, smb_direct=args.smb_direct)
     elif args.check_proof:
         stem = args.check_proof
         require(POINT.fullmatch(stem), 'identificador inválido')
         receipts = VERIFICATION_RECEIPTS if (VERIFICATION_RECEIPTS / (stem + '.json')).exists() else RECEIPTS
         proof = read_receipt(receipts / (stem + '.json'), stem)
-        _, _, generation = bounded_check_proof(BACKUPS, NAS, stem, proof, nas_side=args.nas_side)
+        _, _, generation = bounded_check_proof(BACKUPS, NAS, stem, proof, nas_side=args.nas_side,
+                                               smb_direct=args.smb_direct)
         print(f'Prueba y copia NAS coinciden para {stem}, medios {generation}')
     else:
         rotate(BACKUPS, EXPORT, RECEIPTS, NAS, args.apply)

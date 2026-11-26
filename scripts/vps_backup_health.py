@@ -40,7 +40,7 @@ def atomic(path, text):
     temp.replace(path)
 
 
-def verify_point(rotator, stem, receipts=None, *, nas_side=False):
+def verify_point(rotator, stem, receipts=None, *, nas_side=False, smb_direct=False):
     manifest, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
     directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
     path = directories[0] / (stem + '.json')
@@ -54,6 +54,8 @@ def verify_point(rotator, stem, receipts=None, *, nas_side=False):
         except (OSError, ValueError, KeyError, TypeError):
             continue
     options = {'nas_side': True} if nas_side else {}
+    if smb_direct:
+        options['smb_direct'] = True
     if proof is None:
         payload = json.loads(run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ConnectTimeout=20', NAS_ALIAS, 'restore', stem, checksum]))
@@ -80,8 +82,9 @@ def verify_point(rotator, stem, receipts=None, *, nas_side=False):
     return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
 
 
-def maintain(rotator, verify_only=False, *, nas_side=False):
+def maintain(rotator, verify_only=False, *, nas_side=False, smb_direct=False):
     rotator.require(not nas_side or verify_only, 'NAS-side verification requires verify-only')
+    rotator.require(not smb_direct or nas_side, 'Direct SMB requires NAS-side verification')
     receipts = None
     if verify_only:
         receipts = STATE / 'verification-receipts'
@@ -104,6 +107,8 @@ def maintain(rotator, verify_only=False, *, nas_side=False):
         run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=20',
              NAS_ALIAS, 'status'])
         options = {'nas_side': True} if nas_side else {}
+        if smb_direct:
+            options['smb_direct'] = True
         verified = [verify_point(rotator, point, receipts=receipts, **options) for point in points]
     if verify_only:
         return dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")
@@ -130,7 +135,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--verify-only', action='store_true', help='Verify recovery without rotation or Docker maintenance')
     parser.add_argument('--nas-side', action='store_true', help='Hash on NAS and separately check SMB access')
+    parser.add_argument('--smb-direct', action='store_true', help='Use encrypted SMB without the kernel mount')
     args = parser.parse_args()
+    if args.smb_direct and not args.nas_side:
+        parser.error('--smb-direct requires --nas-side')
     if args.nas_side and not args.verify_only:
         parser.error('--nas-side requires --verify-only')
     os.umask(0o077)
@@ -142,6 +150,8 @@ def main():
             report['before'] = snapshot()
             rotator = importlib.machinery.SourceFileLoader('rotator', ROTATOR).load_module()
             options = {'nas_side': True} if args.nas_side else {}
+            if args.smb_direct:
+                options['smb_direct'] = True
             report.update(maintain(rotator, verify_only=args.verify_only, **options))
             report['success'] = True
         except Exception as error:
