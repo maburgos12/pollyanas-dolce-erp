@@ -97,5 +97,5 @@ async function consult(url) {
 
         self.assertIn("versionCode = 3", build_gradle)
         self.assertIn('versionName = "1.0.3"', build_gradle)
-        self.assertIn("route-control-v103-avisos-vencimiento", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v103-avisos-vencimiento", service_worker)
+        self.assertIn("route-control-v104-avisos-vencimiento", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v104-avisos-vencimiento", service_worker)

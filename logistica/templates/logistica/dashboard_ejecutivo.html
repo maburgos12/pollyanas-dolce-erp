@@ -26,7 +26,7 @@
     {% endif %}
     <p>Destinatarios institucionales{% if avisos_vencimiento.respaldo %} · respaldo de Dirección{% endif %}: <strong>{{ avisos_vencimiento.destinatarios|join:", "|default:"Sin destinatarios válidos" }}</strong></p>
     <p>Último intento de revisión: <strong>{{ avisos_vencimiento.ultima_ejecucion|date:"d/m/Y H:i"|default:"Sin registro" }}</strong>.
-      {{ avisos_vencimiento.pendientes }} avisos pendientes{% if avisos_vencimiento.inciertos %}; {{ avisos_vencimiento.inciertos }} con resultado incierto{% endif %}.</p>
+      {{ avisos_vencimiento.pendientes }} aviso{{ avisos_vencimiento.pendientes|pluralize }} pendiente{{ avisos_vencimiento.pendientes|pluralize }}{% if avisos_vencimiento.inciertos %}; {{ avisos_vencimiento.inciertos }} con resultado incierto{% endif %}.</p>
   </section>
 
   <section class="exec-kpis">
