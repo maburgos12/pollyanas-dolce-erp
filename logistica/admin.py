@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    AvisoVencimientoFlota,
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
@@ -506,3 +507,21 @@ class ConfigAlertaFlotaAdmin(admin.ModelAdmin):
     list_display = ("tipo", "activa", "dias_anticipacion_1", "dias_anticipacion_2", "dias_anticipacion_3")
     list_filter = ("activa", "tipo")
     filter_horizontal = ("destinatarios",)
+    readonly_fields = ("ultima_ejecucion", "ultimo_resultado")
+
+
+@admin.register(AvisoVencimientoFlota)
+class AvisoVencimientoFlotaAdmin(admin.ModelAdmin):
+    list_display = ("fuente", "objeto_id", "fecha_vencimiento", "destinatario", "estado_envio", "intentos", "actualizado_en")
+    list_filter = ("estado_envio", "fuente")
+    search_fields = ("destinatario", "clave")
+    readonly_fields = tuple(field.name for field in AvisoVencimientoFlota._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
