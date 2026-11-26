@@ -2909,6 +2909,10 @@ class CampanaClima(models.Model):
     fecha_cierre = models.DateField()
     cuestionario = models.JSONField()
     recepcion_habilitada = models.BooleanField(default=False)
+    abierta_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="campanas_clima_abiertas")
+    abierta_en = models.DateTimeField(null=True, blank=True)
+    envio_solicitado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="campanas_clima_enviadas")
+    envio_solicitado_en = models.DateTimeField(null=True, blank=True)
     creada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     creada_en = models.DateTimeField(auto_now_add=True)
 
@@ -2927,6 +2931,9 @@ class ParticipanteClima(models.Model):
     sucursal = models.CharField(max_length=120, blank=True)
     respondio = models.BooleanField(default=False)
     envio_whatsapp_autorizado = models.BooleanField(default=False)
+    telefono_autorizado_digest = models.CharField(max_length=64, blank=True)
+    autorizado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="participantes_clima_autorizados")
+    autorizado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["campana", "empleado"], name="clima_participante_unico")]
@@ -2945,6 +2952,19 @@ class AvisoClima(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["participante", "tipo"], name="clima_aviso_unico")]
+
+
+class EventoCampanaClima(models.Model):
+    """Bitácora de decisiones de entrega; nunca almacena respuestas."""
+    campana = models.ForeignKey(CampanaClima, on_delete=models.PROTECT, related_name="eventos")
+    participante = models.ForeignKey(ParticipanteClima, null=True, blank=True, on_delete=models.PROTECT)
+    accion = models.CharField(max_length=30)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    detalle = models.CharField(max_length=180, blank=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
 
 
 class RespuestaClima(models.Model):

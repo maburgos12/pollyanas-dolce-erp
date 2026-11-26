@@ -36,6 +36,7 @@ urlpatterns = [
     path("mi-equipo/", views_equipo.mi_equipo, name="mi_equipo"),
     path("clima/", views_clima.campanas_clima, name="clima_campanas"),
     path("clima/<int:pk>/", views_clima.detalle_clima, name="clima_detalle"),
+    path("clima/<int:pk>/accion/", views_clima.accion_clima, name="clima_accion"),
     path("clima/<int:pk>/participante/<int:participante_id>/acceso/", views_clima.acceso_individual_clima, name="clima_acceso_individual"),
     path("clima/acceso/<str:token>/", views_clima.acceso_publico_clima, name="clima_acceso_publico"),
     path("", views.empleados, name="home"),

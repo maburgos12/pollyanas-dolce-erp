@@ -1,8 +1,11 @@
 """Invitaciones de clima por WhatsApp, cerradas hasta habilitación explícita."""
 
 import os
+import hmac
+import hashlib
 from datetime import timedelta
 
+from django.conf import settings
 from django.core import signing
 from django.db import transaction
 from django.urls import reverse
@@ -26,7 +29,11 @@ def _habilitado():
     return os.getenv("CLIMA_META_ENVIOS_HABILITADOS", "").lower() in {"1", "true", "yes", "on"}
 
 
-def procesar_avisos_clima():
+def digest_telefono(telefono):
+    return hmac.new(settings.SECRET_KEY.encode(), f"clima:{telefono}".encode(), hashlib.sha256).hexdigest()
+
+
+def procesar_avisos_clima(campana_id=None):
     """Una invitación y un recordatorio máximo por persona y campaña."""
     if not _habilitado():
         return {"estado": "deshabilitado", "procesados": 0}
@@ -37,13 +44,25 @@ def procesar_avisos_clima():
         empleado__activo=True,
         empleado__tipo_personal=Empleado.TIPO_POLLYANA,
         campana__recepcion_habilitada=True,
+        campana__envio_solicitado_en__isnull=False,
         campana__fecha_cierre__gte=timezone.localdate(),
-    ).values_list("pk", flat=True)
+    )
+    if campana_id is not None:
+        candidatos = candidatos.filter(campana_id=campana_id)
+    candidatos = candidatos.values_list("pk", flat=True)
     for pk in candidatos.iterator():
         envio = _preparar_aviso(pk)
         if envio:
             aviso_id, telefono, plantilla, parametros = envio
-            if not ParticipanteClima.objects.filter(pk=pk, respondio=False, campana__recepcion_habilitada=True).exists():
+            vigente = (ParticipanteClima.objects.select_related("empleado", "campana")
+                       .filter(pk=pk, respondio=False, envio_whatsapp_autorizado=True,
+                               empleado__activo=True, empleado__tipo_personal=Empleado.TIPO_POLLYANA,
+                               campana__recepcion_habilitada=True,
+                               campana__envio_solicitado_en__isnull=False,
+                               campana__fecha_cierre__gte=timezone.localdate()).first())
+            if (not vigente or normalizar_telefono(vigente.empleado.telefono) != telefono
+                    or not hmac.compare_digest(vigente.telefono_autorizado_digest, digest_telefono(telefono))):
+                AvisoClima.objects.filter(pk=aviso_id, estado="INCIERTO").update(estado="SIN_CANAL")
                 continue
             try:
                 resultado = whatsapp.enviar_plantilla(
@@ -57,7 +76,10 @@ def procesar_avisos_clima():
                 estado=resultado.estado, referencia_externa=resultado.referencia,
             )
             procesados += 1
-    for aviso_id in AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE").values_list("pk", flat=True).iterator():
+    confirmaciones = AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE", participante__campana__envio_solicitado_en__isnull=False)
+    if campana_id is not None:
+        confirmaciones = confirmaciones.filter(participante__campana_id=campana_id)
+    for aviso_id in confirmaciones.values_list("pk", flat=True).iterator():
         procesados += int(enviar_confirmacion_clima(aviso_id))
     return {"estado": "ejecutado", "procesados": procesados}
 
@@ -70,12 +92,12 @@ def enviar_confirmacion_clima(aviso_id):
         aviso = (AvisoClima.objects.select_for_update(skip_locked=True)
                  .select_related("participante__campana", "participante__empleado")
                  .filter(pk=aviso_id, tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE").first())
-        if not aviso or not aviso.participante.respondio or not aviso.participante.envio_whatsapp_autorizado:
+        if not aviso or not aviso.participante.respondio or not aviso.participante.envio_whatsapp_autorizado or not aviso.participante.campana.envio_solicitado_en:
             return False
         if not aviso.participante.empleado.activo or aviso.participante.empleado.tipo_personal != Empleado.TIPO_POLLYANA:
             return False
         telefono = _telefono_unico(aviso.participante)
-        if not telefono:
+        if not telefono or not hmac.compare_digest(aviso.participante.telefono_autorizado_digest, digest_telefono(telefono)):
             return False
         aviso.estado = "INCIERTO"
         aviso.intentado_en = timezone.now()
@@ -110,11 +132,11 @@ def _preparar_aviso(pk):
         return False
     campana, empleado = participante.campana, participante.empleado
     if (participante.respondio or not empleado.activo or empleado.tipo_personal != Empleado.TIPO_POLLYANA
-            or not campana.recepcion_habilitada
+            or not campana.recepcion_habilitada or not campana.envio_solicitado_en
             or campana.fecha_cierre < timezone.localdate()):
         return False
     telefono = _telefono_unico(participante)
-    if not telefono:
+    if not telefono or not hmac.compare_digest(participante.telefono_autorizado_digest, digest_telefono(telefono)):
         return False
     invitacion = AvisoClima.objects.filter(participante=participante, tipo=AvisoClima.INVITACION).first()
     if invitacion is None:
