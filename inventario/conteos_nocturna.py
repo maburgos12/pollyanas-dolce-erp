@@ -136,7 +136,7 @@ def conciliar_conteos_nocturnos():
                             sync_job__status=PointSyncJob.STATUS_SUCCESS,
                             sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
                             sync_job__finished_at__lte=now,
-                        ).select_related('sync_job').order_by('-captured_at','-pk').first()
+                        ).select_related('sync_job', 'shared_payload').order_by('-captured_at','-pk').first()
                         if snapshot and PointInventorySnapshot.objects.filter(
                                 branch=branch,product_id=reading.linea.producto_id,sync_job_id=snapshot.sync_job_id,
                         ).exclude(pk=snapshot.pk).exists():

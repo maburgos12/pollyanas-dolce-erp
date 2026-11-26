@@ -32,7 +32,7 @@ class DailyCountCalculationTests(SimpleTestCase):
         self.snapshot = SimpleNamespace(
             pk=10, product_id=1, branch_id=1, stock=Decimal('3'),
             captured_at=self.cut+timedelta(minutes=30),
-            raw_payload={'headers':['Codigo','Cantidad','Unidad'],'row':['C100','3','PZA']},
+            effective_raw_payload={'headers':['Codigo','Cantidad','Unidad'],'row':['C100','3','PZA']},
             sync_job=SimpleNamespace(pk=5, status=PointSyncJob.STATUS_SUCCESS,
                 job_type=PointSyncJob.JOB_TYPE_INVENTORY,
                 started_at=self.cut+timedelta(minutes=29),
@@ -68,7 +68,7 @@ class DailyCountCalculationTests(SimpleTestCase):
     def test_verified_empty_history_and_explicit_zero_are_calculable(self):
         self.reading.cantidad = Decimal('0')
         self.snapshot.stock = Decimal('0')
-        self.snapshot.raw_payload['row'][1] = '0'
+        self.snapshot.effective_raw_payload['row'][1] = '0'
         self.batch['unique_rows'] = []
         self.batch['evidence']['original_count'] = 0
         result = self.calculate()
@@ -95,7 +95,7 @@ class DailyCountCalculationTests(SimpleTestCase):
             {'headers':['Codigo','Cantidad','Unidad'],'row':['OTHER','3','PZA']},
         ]:
             with self.subTest(raw=raw):
-                self.snapshot.raw_payload=raw
+                self.snapshot.effective_raw_payload=raw
                 self.assertEqual(self.calculate()['estado'],'PENDIENTE')
 
     def test_failed_cycle_and_old_receipt_are_pending(self):
@@ -145,7 +145,7 @@ class DailyCountCalculationTests(SimpleTestCase):
         self.batch['unique_rows'][1]=movement(102,self.when+timedelta(minutes=30),'VENTA','2','1')
         self.batch['unique_rows'][2]=movement(103,self.cut+timedelta(minutes=15),'VENTA','1','0')
         self.snapshot.stock=Decimal('0')
-        self.snapshot.raw_payload['row'][1]='0'
+        self.snapshot.effective_raw_payload['row'][1]='0'
         self.assertEqual(self.calculate()['estado'],'PENDIENTE')
 
     def test_cancelled_inert_movement_does_not_replace_effective_anchor(self):
@@ -157,7 +157,7 @@ class DailyCountCalculationTests(SimpleTestCase):
         self.reading.contado_en=self.cut+timedelta(minutes=20)
         self.reading.cantidad=Decimal('0')
         self.snapshot.stock=Decimal('0')
-        self.snapshot.raw_payload['row'][1]='0'
+        self.snapshot.effective_raw_payload['row'][1]='0'
         self.batch['unique_rows']=[movement(101,self.cut,'VENTA','1','0')]
         self.batch['evidence']['original_count']=500
         self.assertEqual(self.calculate()['estado'],'PENDIENTE')
