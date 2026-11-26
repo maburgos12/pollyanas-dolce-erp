@@ -378,6 +378,29 @@ class ControlCampanaClimaTests(TestCase):
     def accion(self, accion, **datos):
         return self.client.post(self.url, {"accion": accion, **datos}, HTTP_ACCEPT="application/json")
 
+    def test_envio_inmediato_va_a_cola_de_notificaciones(self):
+        from config.celery import app
+
+        self.assertEqual(
+            app.amqp.router.route({}, "rrhh.procesar_avisos_clima_campana", args=(self.campana.pk,), kwargs={})["queue"].name,
+            "notificaciones",
+        )
+
+    def test_detalle_con_envio_solicitado_mantiene_boton_y_estado(self):
+        self.accion("autorizar", participante_id=self.persona.pk, titularidad_confirmada="si")
+        self.campana.recepcion_habilitada = True
+        self.campana.envio_solicitado_en = timezone.now()
+        self.campana.save(update_fields=["recepcion_habilitada", "envio_solicitado_en"])
+        url = reverse("rrhh:clima_detalle", args=[self.campana.pk])
+        respuesta = self.client.get(url)
+        self.assertContains(respuesta, "Envío solicitado · todavía sin intentos")
+        self.assertContains(respuesta, 'disabled>Enviar invitaciones por WhatsApp</button>')
+        AvisoClima.objects.create(participante=self.persona, tipo=AvisoClima.INVITACION, estado="ENVIADO")
+        respuesta = self.client.get(url)
+        self.assertContains(respuesta, "Envío procesado por el ERP")
+        self.assertContains(respuesta, "Meta aceptó el envío, pero todavía no podemos confirmar entrega")
+        self.assertContains(respuesta, 'disabled>Enviar invitaciones por WhatsApp</button>')
+
     def test_detalle_muestra_solo_casos_pendientes_y_oculta_resto(self):
         pendiente = Empleado.objects.create(nombre="Pendiente de autorización", telefono="6672223344")
         corregir = Empleado.objects.create(nombre="Contacto por corregir", telefono="")
