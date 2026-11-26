@@ -62,6 +62,12 @@ sin iniciar rotación ni mantenimiento Docker. Los recibos nuevos se guardan en
 de `receipts`, que consume el rotador. Verificar no convierte un respaldo nuevo en
 elegible para retiro. Puede leer recibos canónicos válidos, pero no los modifica;
 siempre comprueba nuevamente el contenido del NAS antes de informar éxito.
+Cuando la restauración nativa termina pero falla el cotejo CIFS, el servicio
+conserva la prueba y su registro en el subdirectorio privado `pending-restores`.
+El siguiente intento reusa esa prueba sólo si corresponden el manifiesto
+y el SHA-256 del registro. Vuelve a comprobar todos los archivos por CIFS
+antes de publicar el recibo definitivo; el estado pendiente no autoriza un
+retiro ni cambia por sí solo el resultado de salud.
 El cron del rotador existente sigue
 usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
 no amplía su autorización ni autoriza otros lotes de limpieza.
