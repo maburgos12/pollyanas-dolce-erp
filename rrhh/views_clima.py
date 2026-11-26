@@ -175,6 +175,9 @@ def detalle_clima(request, pk):
         empleado["incluido"] = empleado["id"] in seleccionados
     autorizados = sum(p.autorizacion_vigente for p in participantes if not p.respondio)
     whatsapp_listos = sum(p.whatsapp_listo for p in participantes if not p.respondio)
+    lote_autorizables = sum(p.whatsapp_listo and not p.autorizacion_vigente and not p.respondio
+                           and not p.aviso_invitacion for p in participantes)
+    lote_revisar = sum(not p.whatsapp_listo and not p.respondio for p in participantes)
     avisos_resumen = Counter(a.estado for a in avisos.values())
     entrega_resumen = Counter(a.entrega_estado for a in avisos.values() if a.estado == "ENVIADO")
     sin_intento = sum(p.autorizacion_vigente and not p.respondio and p.pk not in avisos for p in participantes)
@@ -213,6 +216,8 @@ def detalle_clima(request, pk):
         "tiene_autorizaciones": any(p.envio_whatsapp_autorizado for p in participantes),
         "tiene_decisiones_participante": campana.eventos.filter(participante__isnull=False).exists(),
         "whatsapp_listos": whatsapp_listos,
+        "lote_autorizables": lote_autorizables,
+        "lote_revisar": lote_revisar,
         "avisos_resumen": avisos_resumen,
         "entrega_resumen": entrega_resumen,
         "webhook_configurado": bool(os.getenv("META_APP_SECRET") and os.getenv("CLIMA_META_WEBHOOK_VERIFY_TOKEN")
@@ -275,6 +280,50 @@ def accion_clima(request, pk):
             EventoCampanaClima.objects.create(campana=campana, accion="PADRON", actor=request.user,
                                               detalle=f"{len(nuevos)} incluidos; {len(nuevos - actuales)} altas; {len(actuales - nuevos)} retiros")
             return responder(f"Padrón guardado: {len(nuevos)} personas incluidas.")
+        if accion == "autorizar_lote":
+            if campana.envio_solicitado_en:
+                return responder("El envío ya fue solicitado; no se puede cambiar el lote.", error=True)
+            if request.POST.get("titularidad_confirmada") != "si":
+                return responder("Confirma que los WhatsApp del lote pertenecen a las personas incluidas.", error=True)
+            personas = list(campana.participantes.select_for_update().select_related("empleado"))
+            if not personas:
+                return responder("La campaña no tiene personas incluidas.", error=True)
+            telefonos = {p.pk: normalizar_telefono(p.empleado.telefono) for p in personas}
+            frecuencia = Counter(t for t in telefonos.values() if t)
+            con_intento = set(AvisoClima.objects.filter(
+                participante__campana=campana, tipo=AvisoClima.INVITACION,
+            ).values_list("participante_id", flat=True))
+            nuevas = []
+            revisar = 0
+            ya_autorizadas = 0
+            ahora = timezone.now()
+            for persona in personas:
+                if persona.respondio or persona.pk in con_intento:
+                    continue
+                telefono = telefonos[persona.pk]
+                if (not persona.empleado.activo or persona.empleado.tipo_personal != Empleado.TIPO_POLLYANA
+                        or not telefono or frecuencia[telefono] != 1):
+                    revisar += 1
+                    continue
+                digest = digest_telefono(telefono)
+                if persona.envio_whatsapp_autorizado and persona.telefono_autorizado_digest == digest:
+                    ya_autorizadas += 1
+                    continue
+                persona.envio_whatsapp_autorizado = True
+                persona.telefono_autorizado_digest = digest
+                persona.autorizado_por = request.user
+                persona.autorizado_en = ahora
+                nuevas.append(persona)
+            if not nuevas:
+                return responder(f"No hay nuevos contactos aptos. Ya autorizados: {ya_autorizadas}; por revisar: {revisar}.", error=True)
+            ParticipanteClima.objects.bulk_update(
+                nuevas, ["envio_whatsapp_autorizado", "telefono_autorizado_digest", "autorizado_por", "autorizado_en"],
+            )
+            EventoCampanaClima.objects.create(
+                campana=campana, accion="AUTORIZAR_LOTE", actor=request.user,
+                detalle=f"{len(nuevas)} autorizados; {ya_autorizadas} ya autorizados; {revisar} por revisar",
+            )
+            return responder(f"Autorizados {len(nuevas)} contactos. Ya autorizados: {ya_autorizadas}; por revisar: {revisar}. La campaña sigue cerrada y no se enviaron mensajes.")
         if accion in {"autorizar", "revocar"}:
             if campana.envio_solicitado_en:
                 return responder("El envío ya fue solicitado; no se puede cambiar el lote.", error=True)
