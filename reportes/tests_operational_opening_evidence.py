@@ -56,6 +56,19 @@ class OperationalOpeningEvidenceTests(InventoryAuditAgentFixtures, TestCase):
         self.case.refresh_from_db()
         self.assertEqual(self.case.opening_point, Decimal("0"))
 
+    def test_opening_reads_shared_evidence_without_changing_its_source_cut(self):
+        from pos_bridge.services.sync_service import _share_inventory_payloads
+
+        _share_inventory_payloads([self.snapshot])
+        self.snapshot.save(update_fields=["shared_payload", "raw_payload"])
+        with CaptureQueriesContext(connection) as queries:
+            self.add()
+        evidence = self.visible["operational_opening_evidence"]
+        self.assertEqual(evidence["quantity"], Decimal("3.25"))
+        self.assertEqual(evidence["snapshot_id"], self.snapshot.pk)
+        self.assertEqual(evidence["captured_at"], self.snapshot.captured_at)
+        self.assertEqual(len(queries), 3)
+
     def test_other_month_and_already_known_opening_are_not_enriched(self):
         self.add(date(2026, 9, 30))
         self.assertNotIn("operational_opening_evidence", self.visible)

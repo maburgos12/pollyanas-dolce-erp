@@ -91,14 +91,15 @@ def read_operational_reconciliation(cases, snapshots):
     fresh = list(PointInventorySnapshot.objects.filter(sync_job_id=81086, branch_id=28,
         product_id__in=snapshots, captured_at=min(s.captured_at for s in snapshots.values()),
         sync_job__status="SUCCESS", sync_job__job_type="inventory")
-        .only("product_id", "captured_at", "stock", "raw_payload"))
+        .select_related("shared_payload")
+        .only("product_id", "captured_at", "stock", "raw_payload", "shared_payload__payload"))
     current = defaultdict(list)
     for snapshot in fresh:
         current[snapshot.product_id].append(snapshot)
     valid = {product for product, original in snapshots.items()
              if len(current[product]) == 1 and current[product][0].pk == original.pk
              and current[product][0].stock == original.stock
-             and current[product][0].raw_payload == original.raw_payload}
+             and current[product][0].effective_raw_payload == original.effective_raw_payload}
     cases = [case for case in cases if case.product_id in valid]
     if not cases:
         return {}
