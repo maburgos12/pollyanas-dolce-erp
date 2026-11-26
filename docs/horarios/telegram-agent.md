@@ -188,3 +188,87 @@ completa con un botón nuevo.
 
 Si la IA termina dentro del plazo de la corrección, el bot puede recoger el
 resultado en la siguiente consulta mientras el borrador original siga vigente.
+
+## Historias con segunda aprobación (receptor Marketing v2)
+
+La aprobación de horarios no aprueba una publicación social. Con la integración
+habilitada, su recibo ofrece **Preparar historia**. El ERP guarda una revisión de
+arte independiente, pide una plantilla fotográfica al planificador y obtiene su
+imagen normalizada. Envía esos bytes al chat privado con otro nonce, mensaje y botón
+**Aprobar imagen y programación**. No publica posts ni reels: sólo Stories de
+Facebook e Instagram. El arte usa el banco de fotos y el estilo ya aprobados:
+rebanadas, pastel de chocolate y galletas, con texto blanco serif centrado sobre
+la foto, sin recuadro. La vista previa permite decidir sobre la imagen real antes
+de aprobarla. No hay fallback al aviso liso de pruebas.
+
+`POST /assets/template` recibe la clave estable de solicitud/hash ERP/arte y el
+texto. Marketing reserva la foto sin repetir la elección anterior y congela el
+JPEG antes de codificar video. Un reintento conserva exactamente el mismo arte;
+no avanza la rotación ni cambia una imagen ya revisada. ERP conserva
+`template_id`, `template_source_sha256` y `template_style_version=photo-serif-v1`
+junto al asset y su hash. Falta de catálogo/foto o respuesta sin estos datos no
+autoriza otro diseño. El banco se instala de las fuentes originales verificadas
+durante el despliegue; no se infieren fotos por una búsqueda de diseños ajenos.
+El ID es un slug validado, no una enumeración cerrada a las tres fotos iniciales:
+añadir otra fotografía aprobada al catálogo de Marketing no exige cambiar ERP.
+
+Los ejemplos y fotografías nuevos que Mauricio apruebe en este hilo amplían la
+referencia de la plantilla mediante el catálogo controlado: foto, versión del
+estilo, tipografía, tamaños, color, alineación y ubicación del texto. Una nueva
+foto no autoriza cambiar automáticamente la identidad visual. El nombre exacto
+de la fuente no se infiere de una imagen rasterizada; una reconstrucción debe
+compararse visualmente con la referencia antes de fijarse como versión aprobada.
+
+Aplicar migración `horarios_especiales.0005`. Se reutilizan el polling, la identidad
+ERP/Telegram y la primera aprobación auditada; `TelegramHoursStory` es el outbox
+durable de arte, recibo y revocación. Identidad externa:
+`hours:<request_id>:<canonical_payload.revision SHA256>:<art_revision>`.
+El hash ERP no es un número de revisión ni se ordena por magnitud.
+
+Contrato del receptor: [Marketing, hours-stories v2](https://github.com/maburgos12/Agente-marketing/blob/codex/horarios-stories-bot/docs/integrations/hours-stories.md).
+Usa únicamente el origen fijo de Marketing y HMAC sobre timestamp, método, ruta
+backend sin `/api` y cuerpo exacto. Los IDs del callback no autentican al emisor.
+`HOURS_BOT_SIGNING_SECRET` debe ser exclusivo de esta integración, compartido por
+ERP y Marketing mediante el procedimiento autorizado de configuración con respaldo;
+no se reutiliza el token Telegram ni la API key global. Nunca imprimirlo.
+
+`HOURS_STORIES_ENABLED=true` habilita preparar/aprobar arte; omitido o cualquier
+otro valor lo deshabilita. Conservarlo apagado hasta verificar ambos servicios.
+El receptor tiene además `HOURS_BOT_PUBLISHING_ENABLED=false` por defecto.
+Desplegar primero ambos lados apagados y aplicar la migración antes del worker.
+La activación requiere configurar el secreto en los procesos consumidores y
+recrearlos; no basta editar una variable del shell. Esta implementación no cambia
+credenciales, configuración productiva ni tareas Beat.
+
+Cada aprobación vincula bot, usuario ERP activo, usuario/chat Telegram, mensaje,
+nonce, hash ERP, revisión de arte y snapshot vigente. Un replay conserva el recibo
+original; los reintentos envían sus mismos bytes. Un timeout o un 401/503 posterior
+no prueba que la primera entrega haya sido rechazada: `APPROVE`/`INVALIDATE`
+permanecen pendientes con código de error hasta recibir confirmación. Supervisar
+`state`, `error_code` y `next_attempt_at`; no reiniciar el arte para resolver una
+respuesta incierta. El fallo de un aviso Telegram tampoco borra los IDs aceptados.
+
+Al cambiar el snapshot, cancelar la solicitud o retirar el vínculo del actor, el
+outbox invalida la revisión exacta, incluyendo una programación ya confirmada o
+pendiente de aviso. La invalidación exige un recibo coincidente. Aun retirando al
+último actor o apagando creación, el polling conserva un camino de **sólo
+revocación** bajo lock con el secreto dedicado. No manda mensajes al actor retirado
+ni crea/aprueba historias. Deben mantenerse el polling y el secreto hasta drenar
+las revocaciones; quitar también el transporte requiere reconciliación manual.
+
+Los avisos requieren un periodo finito de hasta 31 días. La vista muestra cada
+publicación a las 9:00 de Mazatlán y las fechas sin publicación nueva. Se reserva
+la vida completa de 24 horas y margen: no se promete retiro temprano de Instagram,
+ni una publicación el último día que invada la vigencia. Un aviso de un solo día
+sin retiro temprano comprobado se rechaza. La sustitución exige cubrir todas las
+fechas/sucursales del aviso anterior y declarar sus referencias en la segunda
+vista; Marketing espera retiro remoto real antes de programar el reemplazo.
+Invalidar no significa que una historia visible ya fue eliminada. El aviso regular
+de Horario Extendido y otras programaciones no se cancelan por esta integración.
+
+Pruebas: suite `horarios_especiales` sobre PostgreSQL 16; casos de identidad,
+mensaje, nonce, vencimiento, snapshot, pérdida de respuesta, reintento y revocación.
+El transporte se probó también contra Next/API aislados con el cliente HMAC real,
+imagen normalizada y registros sintéticos cancelados. No se envían mensajes ni
+historias de prueba a Telegram/Meta. La prueba local no acredita publicación o
+retiro real en las cuentas; esos gates siguen siendo operativos.

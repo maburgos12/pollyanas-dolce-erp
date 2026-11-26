@@ -177,12 +177,19 @@ class TelegramClient:
 
     def call(self, method, **payload):
         deadline = time.monotonic() + 8
-        if method not in {'getUpdates', 'sendMessage', 'answerCallbackQuery', 'getFile'}:
+        if method not in {'getUpdates', 'sendMessage', 'sendPhoto', 'answerCallbackQuery', 'getFile'}:
             raise ValueError('Método no permitido.')
+        transport = {'json': payload}
+        if method == 'sendPhoto':
+            photo = payload.pop('photo')
+            if not isinstance(photo, bytes) or not 0 < len(photo) <= 6_000_000:
+                raise ValueError('Imagen de historia inválida.')
+            payload['reply_markup'] = json.dumps(payload['reply_markup'], ensure_ascii=False)
+            transport = {'data': payload, 'files': {'photo': ('horario.jpg', photo, 'image/jpeg')}}
         try:
             with requests.Session() as session:
                 session.trust_env = False
-                with session.post(f'https://api.telegram.org/bot{self.token}/{method}', json=payload,
+                with session.post(f'https://api.telegram.org/bot{self.token}/{method}', **transport,
                                   timeout=(3, 5), allow_redirects=False, stream=True) as response:
                     if response.status_code != 200:
                         raise TelegramUnavailable('Telegram no disponible; intento conservado.')
@@ -622,6 +629,11 @@ def process_callback(row, config, actor):
     config = config_for_row(config, row)
     actor = actor_for(config)
     callback = row.payload['callback_query']
+    if callback.get('data', '').startswith(('storydraft:', 'storyapprove:')):
+        from horarios_especiales.services.telegram_stories import handle_callback
+        row.state, row.receipt = 'REPLY', {'text': handle_callback(row, config, actor)}
+        row.save(update_fields=['state', 'receipt'])
+        return
     match = re.fullmatch(r'approve:(\d+):([a-f0-9]{32})', callback.get('data', ''))
     old = TelegramHoursUpdate.objects.select_for_update().filter(pk=int(match[1])).first() if match and 0 < int(match[1]) < 2**63 else None
     valid = authorized(row.payload, config) and old and old.request_id and old.request.requested_by_id == actor.pk and old.erp_user_id in (None, actor.pk) and old.bot_id == config['bot_id'] and old.telegram_user_id == row.telegram_user_id and old.chat_id == row.chat_id and old.preview_message_id == row.message_id and secrets.compare_digest(old.nonce, match[2])
@@ -646,7 +658,13 @@ def process_callback(row, config, actor):
     else:
         text = 'Botón vencido, reemplazado o ya procesado. No se registró otra aprobación. Consulta /status.'
     row.state, row.receipt = 'REPLY', {'text': text}
-    row.save(update_fields=['state', 'receipt'])
+    if valid and old.state == 'APPROVED' and text.startswith('Aprobación registrada'):
+        from horarios_especiales.services.story_planner import MarketingClient
+        if MarketingClient.configured():
+            row.request = old.request
+            row.nonce = secrets.token_hex(16)
+            row.receipt['build_story'] = True
+    row.save(update_fields=['state', 'receipt', 'request', 'nonce'])
 
 
 def process_received(row, config, actor):
@@ -698,6 +716,10 @@ def deliver(row, client, config):
         payload['parse_mode'] = 'HTML'
     if row.state == 'PREPARED':
         payload['reply_markup'] = {'inline_keyboard': [[{'text': 'Aprobar esta revisión', 'callback_data': f'approve:{row.pk}:{row.nonce}'}]]}
+    if row.state == 'REPLY' and row.receipt.get('build_story'):
+        payload['reply_markup'] = {'inline_keyboard': [[{
+            'text': 'Preparar historia', 'callback_data': f'storydraft:{row.pk}:{row.nonce}',
+        }]]}
     result = client.call('sendMessage', **payload)
     if (not isinstance(result, dict) or type(result.get('message_id')) is not int or result['message_id'] <= 0
             or not isinstance(result.get('chat'), dict) or not isinstance(result.get('from'), dict)
@@ -710,6 +732,8 @@ def deliver(row, client, config):
     elif row.state in ('AUDIO_WAIT', 'IA_WAIT'):
         row.receipt['acknowledged'] = True
     else:
+        if row.receipt.get('build_story'):
+            row.preview_message_id = result['message_id']
         row.state = 'DONE'
     row.save(update_fields=['state', 'preview_message_id', 'receipt'])
 
@@ -735,6 +759,14 @@ def poll_once(config=None, client=None):
     deadline = time.monotonic() + 25
     config = config or load_config()
     if not active_configs(config):
+        # Withdrawing the last actor must not strand previously accepted
+        # Stories. This path only revokes; it cannot poll or approve new work.
+        from horarios_especiales.services.story_planner import MarketingClient
+        from horarios_especiales.services.telegram_stories import advance as advance_stories
+        with consumer_lock(config['bot_id']) as locked:
+            marketing = MarketingClient.configured(for_revocation=True)
+            if locked and marketing:
+                advance_stories(config, None, marketing, revocations_only=True)
         actor_for(config)
     client = client or TelegramClient(config)
     with consumer_lock(config['bot_id']) as locked:
@@ -791,4 +823,12 @@ def poll_once(config=None, client=None):
                         disable_notification=True)
             row.receipt['last_status'] = text
             row.save(update_fields=['receipt'])
+        if time.monotonic() + 11 < deadline:
+            from horarios_especiales.services.story_planner import MarketingClient
+            marketing = MarketingClient.configured()
+            revocations_only = marketing is None
+            marketing = marketing or MarketingClient.configured(for_revocation=True)
+            if marketing:
+                from horarios_especiales.services.telegram_stories import advance as advance_stories
+                advance_stories(config, client, marketing, revocations_only=revocations_only)
     return {'polled': True}
