@@ -414,6 +414,25 @@ class ControlCampanaClimaTests(TestCase):
     def accion(self, accion, **datos):
         return self.client.post(self.url, {"accion": accion, **datos}, HTTP_ACCEPT="application/json")
 
+    def test_tabla_seguimiento_prioriza_pendientes_sin_mostrar_respuestas(self):
+        pendiente = Empleado.objects.create(nombre="ANA PENDIENTE")
+        ParticipanteClima.objects.create(campana=self.campana, empleado=pendiente, nombre=pendiente.nombre)
+        self.persona.respondio = True
+        self.persona.save(update_fields=["respondio"])
+        RespuestaClima.objects.create(
+            campana=self.campana, departamento="Producción", respuestas={"q_0": "Dato privado de Paula"},
+        )
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        response = self.client.get(reverse("rrhh:clima_detalle", args=[self.campana.pk]))
+        self.assertContains(response, "1 pendiente")
+        self.assertContains(response, "1 respondió de 2 personas")
+        self.assertNotContains(response, "Dato privado de Paula")
+        tabla = response.content.decode().split('id="seguimiento-clima"', 1)[1].split("</section>", 1)[0]
+        self.assertLess(tabla.index("ANA PENDIENTE"), tabla.index("LUGO ESPINOZA PAULA"))
+        self.assertIn("Respondió", tabla)
+        self.assertIn("Pendiente", tabla)
+
     def test_envio_inmediato_va_a_cola_de_notificaciones(self):
         from config.celery import app
 
@@ -454,7 +473,8 @@ class ControlCampanaClimaTests(TestCase):
         self.assertContains(respuesta, "Contactos autorizados para un envío futuro: 1")
         self.assertContains(respuesta, "Intentos de invitación: 0")
         self.assertContains(respuesta, 'disabled>Enviar invitaciones por WhatsApp</button>')
-        self.assertEqual(respuesta.content.decode().count(self.persona.nombre), 1)
+        autorizaciones = respuesta.content.decode().split('aria-labelledby="participantes"', 1)[1].split('aria-labelledby="apertura"', 1)[0]
+        self.assertEqual(autorizaciones.count(self.persona.nombre), 1)
 
     def test_padron_borrador_se_corrige_solo_antes_de_autorizar(self):
         nueva = Empleado.objects.create(nombre="Nueva persona", telefono="6671112233")
