@@ -50,7 +50,8 @@ class PointInventorySnapshotAdmin(admin.ModelAdmin):
     list_display = ("branch", "product", "stock", "captured_at", "sync_job")
     list_filter = ("captured_at",)
     search_fields = ("branch__name", "product__name", "product__sku", "product__external_id")
-    readonly_fields = ("captured_at",)
+    readonly_fields = ("captured_at", "effective_raw_payload")
+    exclude = ("raw_payload",)
 
 
 @admin.register(PointDailySale)

@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from contextlib import contextmanager
@@ -131,6 +132,38 @@ class PointSyncServiceTests(TestCase):
 
         self.assertEqual(sync_job.status, PointSyncJob.STATUS_FAILED)
         self.assertIn("no devolvió", sync_job.error_message.lower())
+
+    @override_settings(POINT_INVENTORY_SHARE_PAYLOADS=True)
+    def test_identical_inventory_evidence_is_shared_without_losing_cut_times(self):
+        from pos_bridge.models.snapshot import PointInventoryPayload
+
+        extractor = FakeExtractor()
+        service = PointSyncService(extractor=extractor, inventory_cost_capture_service=FakeInventoryCostCaptureService())
+        [cut] = extractor.extract()
+        opening = cut.captured_at
+        closing = opening + timedelta(hours=8)
+        payload = cut.inventory_rows[0]["raw_payload"]
+        with override_settings(POINT_INVENTORY_SHARE_PAYLOADS=False):
+            service.persist_branch_inventory(service.create_job(), cut)
+        cut.captured_at = closing
+        service.persist_branch_inventory(service.create_job(), cut)
+        cut.captured_at = closing + timedelta(hours=1)
+        service.persist_branch_inventory(service.create_job(), cut)
+        cut.inventory_rows[0] = {**cut.inventory_rows[0], "stock": "11",
+                                 "raw_payload": {"row": ["SKU-001", "Pastel Chocolate", "11", "2", "20"]}}
+        cut.captured_at += timedelta(hours=1)
+        service.persist_branch_inventory(service.create_job(), cut)
+
+        rows = list(PointInventorySnapshot.objects.select_related("shared_payload").order_by("captured_at"))
+        self.assertEqual(PointInventoryPayload.objects.count(), 2)
+        self.assertEqual(len({row.sync_job_id for row in rows}), 4)
+        self.assertEqual([row.stock for row in rows], [10, 10, 10, 11])
+        self.assertEqual([row.captured_at for row in rows[:2]], [opening, closing])
+        self.assertIsNone(rows[0].shared_payload_id)
+        self.assertEqual(rows[1].shared_payload_id, rows[2].shared_payload_id)
+        self.assertNotEqual(rows[2].shared_payload_id, rows[3].shared_payload_id)
+        self.assertEqual(rows[1].raw_payload, {})
+        self.assertEqual([row.effective_raw_payload for row in rows[:3]], [payload] * 3)
 
     def test_inventory_omission_reports_products_and_preserves_the_visible_cut(self):
         from django.urls import reverse
