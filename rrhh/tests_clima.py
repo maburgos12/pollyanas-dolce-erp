@@ -392,6 +392,9 @@ class ControlCampanaClimaTests(TestCase):
         self.assertContains(respuesta, "Por autorizar (1)")
         self.assertContains(respuesta, "Contactos por corregir (1)")
         self.assertContains(respuesta, "Ver la otra persona de la campaña")
+        self.assertContains(respuesta, "Contactos autorizados para un envío futuro: 1")
+        self.assertContains(respuesta, "Intentos de invitación: 0")
+        self.assertContains(respuesta, 'disabled>Enviar invitaciones por WhatsApp</button>')
         self.assertEqual(respuesta.content.decode().count(self.persona.nombre), 1)
 
     def test_padron_borrador_se_corrige_solo_antes_de_autorizar(self):

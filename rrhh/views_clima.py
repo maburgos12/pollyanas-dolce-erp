@@ -226,6 +226,7 @@ def detalle_clima(request, pk):
         "contactos_por_corregir": contactos_por_corregir,
         "otros_participantes": otros_participantes,
         "avisos_resumen": avisos_resumen,
+        "invitaciones_intentadas": len(avisos),
         "entrega_resumen": entrega_resumen,
         "webhook_configurado": bool(os.getenv("META_APP_SECRET") and os.getenv("CLIMA_META_WEBHOOK_VERIFY_TOKEN")
                                     and os.getenv("META_WHATSAPP_PHONE_NUMBER_ID")),
