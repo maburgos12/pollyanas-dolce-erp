@@ -3,6 +3,7 @@
 import base64
 import json
 import logging
+import os
 from collections import Counter
 from io import BytesIO
 from pathlib import Path
@@ -148,9 +149,10 @@ def detalle_clima(request, pk):
     participantes = list(campana.participantes.select_related("empleado"))
     cobertura = _cobertura_contacto(((persona, persona.empleado) for persona in participantes), solo_pendientes=True)
     from .services_clima_avisos import _habilitado, digest_telefono
-    avisos = {a.participante_id: a for a in AvisoClima.objects.filter(
-        participante__campana=campana, tipo=AvisoClima.INVITACION,
-    )}
+    avisos_todos = list(AvisoClima.objects.filter(participante__campana=campana))
+    avisos = {a.participante_id: a for a in avisos_todos if a.tipo == AvisoClima.INVITACION}
+    recordatorios = {a.participante_id: a for a in avisos_todos if a.tipo == AvisoClima.RECORDATORIO}
+    confirmaciones = {a.participante_id: a for a in avisos_todos if a.tipo == AvisoClima.CONFIRMACION}
     telefonos = {persona.pk: normalizar_telefono(persona.empleado.telefono) for persona in participantes}
     frecuencia = Counter(telefono for telefono in telefonos.values() if telefono)
     for persona in participantes:
@@ -161,6 +163,8 @@ def detalle_clima(request, pk):
         persona.autorizacion_vigente = bool(persona.envio_whatsapp_autorizado and telefono and
                                            persona.telefono_autorizado_digest == digest_telefono(telefono))
         persona.aviso_invitacion = avisos.get(persona.pk)
+        persona.aviso_recordatorio = recordatorios.get(persona.pk)
+        persona.aviso_confirmacion = confirmaciones.get(persona.pk)
     activos_omitidos = list(Empleado.objects.filter(activo=True, tipo_personal=Empleado.TIPO_POLLYANA).exclude(
         pk__in=[p.empleado_id for p in participantes]
     ).order_by("nombre").values("id", "nombre", "departamento"))
@@ -172,6 +176,7 @@ def detalle_clima(request, pk):
     autorizados = sum(p.autorizacion_vigente for p in participantes if not p.respondio)
     whatsapp_listos = sum(p.whatsapp_listo for p in participantes if not p.respondio)
     avisos_resumen = Counter(a.estado for a in avisos.values())
+    entrega_resumen = Counter(a.entrega_estado for a in avisos.values() if a.estado == "ENVIADO")
     sin_intento = sum(p.autorizacion_vigente and not p.respondio and p.pk not in avisos for p in participantes)
     respondieron = len(participantes) - cobertura["total"]
     respuestas = list(campana.respuestas.values("departamento", "respuestas"))
@@ -209,6 +214,8 @@ def detalle_clima(request, pk):
         "tiene_decisiones_participante": campana.eventos.filter(participante__isnull=False).exists(),
         "whatsapp_listos": whatsapp_listos,
         "avisos_resumen": avisos_resumen,
+        "entrega_resumen": entrega_resumen,
+        "webhook_configurado": bool(os.getenv("META_APP_SECRET") and os.getenv("CLIMA_META_WEBHOOK_VERIFY_TOKEN")),
         "sin_intento": sin_intento,
         "envios_habilitados": _habilitado(),
         "puede_decidir": request.user.is_superuser or campana.creada_por_id == request.user.pk,

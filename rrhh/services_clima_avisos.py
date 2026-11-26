@@ -35,6 +35,10 @@ def digest_telefono(telefono):
 
 def procesar_avisos_clima(campana_id=None):
     """Una invitación y un recordatorio máximo por persona y campaña."""
+    from .services_clima_meta import conciliar_estado, conciliar_pendientes_recientes, limpiar_pendientes
+
+    conciliar_pendientes_recientes()
+    limpiar_pendientes()
     if not _habilitado():
         return {"estado": "deshabilitado", "procesados": 0}
     procesados = 0
@@ -75,6 +79,8 @@ def procesar_avisos_clima(campana_id=None):
             AvisoClima.objects.filter(pk=aviso_id).update(
                 estado=resultado.estado, referencia_externa=resultado.referencia,
             )
+            if resultado.referencia:
+                conciliar_estado(aviso_id)
             procesados += 1
     confirmaciones = AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE", participante__campana__envio_solicitado_en__isnull=False)
     if campana_id is not None:
@@ -111,6 +117,9 @@ def enviar_confirmacion_clima(aviso_id):
     AvisoClima.objects.filter(pk=aviso_id, estado="INCIERTO").update(
         estado=resultado.estado, referencia_externa=resultado.referencia,
     )
+    if resultado.referencia:
+        from .services_clima_meta import conciliar_estado
+        conciliar_estado(aviso_id)
     return True
 
 
@@ -141,7 +150,7 @@ def _preparar_aviso(pk):
     invitacion = AvisoClima.objects.filter(participante=participante, tipo=AvisoClima.INVITACION).first()
     if invitacion is None:
         tipo = AvisoClima.INVITACION
-    elif (invitacion.estado == whatsapp.RESULTADO_ENVIADO
+    elif (invitacion.estado == whatsapp.RESULTADO_ENVIADO and invitacion.entrega_estado != "FALLIDO"
           and invitacion.intentado_en <= timezone.now() - timedelta(days=3)
           and not AvisoClima.objects.filter(participante=participante, tipo=AvisoClima.RECORDATORIO).exists()):
         tipo = AvisoClima.RECORDATORIO

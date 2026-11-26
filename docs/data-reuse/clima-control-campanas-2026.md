@@ -21,7 +21,7 @@ Una campaña conserva una selección de empleados y un cuestionario. Cada partic
 | --- | --- | --- | --- |
 | Empleado de RR. HH. y destinatario de clima | Confirmada solo para el `Empleado.id` seleccionado | FK directa y restricción por campaña; el nombre congelado es una foto histórica | Ninguna equivalencia nueva |
 | Teléfono con formato válido y WhatsApp propio | No resuelta | El formato y unicidad en una campaña no acreditan titularidad | Confirmación humana por destinatario antes de autorizar |
-| Aceptado por Meta y entregado al teléfono | Distinta | `wamid` y HTTP exitoso muestran aceptación; no hay webhook de entrega en clima | Configurar seguimiento Meta por evento si se necesita entrega real |
+| Aceptado por Meta y entregado al teléfono | Distinta | `wamid` y HTTP exitoso muestran aceptación; la ampliación recibe `delivered/read` solo cuando Meta configure y firme el webhook | Verificar suscripción y evento real en producción |
 
 ## Decisión de diseño
 
@@ -29,4 +29,4 @@ Reutilizar `Empleado` para estado y contacto vigente, `ParticipanteClima` para s
 
 Consultas o procedimiento reproducible: `manage.py inventario_fuentes_datos --term clima` con `DATABASE_URL` del PostgreSQL aislado; `manage.py showmigrations rrhh` y pruebas `rrhh.tests_clima`. No se extrajeron teléfonos ni respuestas de producción para esta ficha.
 
-Riesgos y pendientes: el número puede estar mal asignado aunque tenga formato válido; se necesita confirmación humana. El estado `ENVIADO` representa aceptación por Meta, no entrega ni lectura. Las campañas anteriores no tienen evidencia de autorización con huella y no se autorizan retroactivamente.
+Riesgos y pendientes: el número puede estar mal asignado aunque tenga formato válido; se necesita confirmación humana. El estado `ENVIADO` representa aceptación por Meta; la entrega y lectura dependen del callback firmado y de la suscripción efectiva. Las campañas anteriores no tienen evidencia de autorización con huella y no se autorizan retroactivamente.

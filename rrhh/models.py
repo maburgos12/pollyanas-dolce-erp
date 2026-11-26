@@ -2947,11 +2947,25 @@ class AvisoClima(models.Model):
     participante = models.ForeignKey(ParticipanteClima, on_delete=models.CASCADE, related_name="avisos")
     tipo = models.CharField(max_length=20, choices=[(INVITACION, "Invitación"), (RECORDATORIO, "Recordatorio"), (CONFIRMACION, "Confirmación")])
     estado = models.CharField(max_length=20, default="PENDIENTE")
-    referencia_externa = models.CharField(max_length=180, blank=True)
+    referencia_externa = models.CharField(max_length=180, blank=True, db_index=True)
     intentado_en = models.DateTimeField(null=True, blank=True)
+    entrega_estado = models.CharField(max_length=20, blank=True)
+    entrega_evento_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["participante", "tipo"], name="clima_aviso_unico")]
+
+
+class EstadoMetaClimaPendiente(models.Model):
+    """Estado autenticado que llegó antes de persistir el identificador de Meta."""
+    referencia_digest = models.CharField(max_length=64)
+    estado = models.CharField(max_length=20)
+    evento_en = models.DateTimeField()
+    recibido_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["referencia_digest", "estado", "evento_en"], name="clima_meta_pendiente_unico")]
+        indexes = [models.Index(fields=["recibido_en"], name="clima_meta_pendiente_fecha")]
 
 
 class EventoCampanaClima(models.Model):

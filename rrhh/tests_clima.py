@@ -314,6 +314,19 @@ class AvisosClimaTests(TestCase):
             self.assertEqual(procesar_avisos_clima()["procesados"], 0)
         enviar.assert_called_once()
 
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_entrega_fallida_no_genera_recordatorio_automatico(self, enviar):
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        AvisoClima.objects.create(
+            participante=self.persona, tipo=AvisoClima.INVITACION,
+            estado="ENVIADO", entrega_estado="FALLIDO",
+            intentado_en=timezone.now() - timedelta(days=4),
+        )
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        enviar.assert_not_called()
+
 
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
     def test_contacto_compartido_o_no_autorizado_se_omite(self, enviar):
