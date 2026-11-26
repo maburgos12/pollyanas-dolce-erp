@@ -215,7 +215,8 @@ def detalle_clima(request, pk):
         "whatsapp_listos": whatsapp_listos,
         "avisos_resumen": avisos_resumen,
         "entrega_resumen": entrega_resumen,
-        "webhook_configurado": bool(os.getenv("META_APP_SECRET") and os.getenv("CLIMA_META_WEBHOOK_VERIFY_TOKEN")),
+        "webhook_configurado": bool(os.getenv("META_APP_SECRET") and os.getenv("CLIMA_META_WEBHOOK_VERIFY_TOKEN")
+                                    and os.getenv("META_WHATSAPP_PHONE_NUMBER_ID")),
         "sin_intento": sin_intento,
         "envios_habilitados": _habilitado(),
         "puede_decidir": request.user.is_superuser or campana.creada_por_id == request.user.pk,
