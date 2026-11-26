@@ -14,6 +14,13 @@ def procesar_avisos_clima_diario():
     return procesar_avisos_clima()
 
 
+@shared_task(name="rrhh.procesar_avisos_clima_campana")
+def procesar_avisos_clima_campana(campana_id):
+    from .services_clima_avisos import procesar_avisos_clima
+
+    return procesar_avisos_clima(campana_id=campana_id)
+
+
 @shared_task(name="rrhh.enviar_confirmacion_clima")
 def enviar_confirmacion_clima(aviso_id):
     from .services_clima_avisos import enviar_confirmacion_clima as enviar

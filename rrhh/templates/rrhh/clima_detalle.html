@@ -6,19 +6,67 @@
 {% block content %}
 <div class="clima-page">
   <p><a href="{% url 'rrhh:clima_campanas' %}">← Volver a campañas</a></p>
-  <div class="clima-status" role="status"><strong>{% if cerrada %}Campaña cerrada{% else %}Recepción habilitada{% endif %}</strong><span>Fecha límite prevista: {{ campana.fecha_cierre|date:"d/m/Y" }}. {% if cerrada %}Las ligas y QR no aceptan respuestas.{% endif %} No se envían invitaciones desde este módulo.</span></div>
-  <section class="clima-section" aria-labelledby="cobertura"><h2 id="cobertura">Preparación de entrega</h2>
-    <p>{{ cobertura.total }} personas pendientes: {{ cobertura.listos }} con contacto personal de formato utilizable y no compartido; {{ cobertura.sin_contacto }} sin contacto; {{ cobertura.compartidos }} con dato compartido; {{ cobertura.inactivos }} que ya no están activas. Los casos pueden coincidir.</p>
-    <p>Los datos de contacto se consultan del expediente actual. Hay que confirmar titularidad y aprobar a cada persona antes de entregar su liga. Esta pantalla no envía mensajes ni abre la campaña.</p>
+  <div class="clima-status" role="status"><strong>{% if cerrada %}Campaña cerrada{% else %}Recepción habilitada{% endif %}</strong><span>Fecha límite: {{ campana.fecha_cierre|date:"d/m/Y" }}. {% if cerrada %}Las ligas y QR no aceptan respuestas.{% endif %} {% if campana.envio_solicitado_en %}Envío solicitado el {{ campana.envio_solicitado_en|date:"d/m/Y H:i" }}.{% else %}No se ha solicitado el envío.{% endif %}</span></div>
+  <section class="clima-section" id="preparacion-clima" aria-labelledby="cobertura"><h2 id="cobertura">1. Revisar padrón y contactos</h2>
+    <p>Pendientes: {{ cobertura.total }}; con contacto personal de formato utilizable y no compartido: {{ cobertura.listos }}; sin contacto: {{ cobertura.sin_contacto }}; con dato compartido: {{ cobertura.compartidos }}; ya inactivas: {{ cobertura.inactivos }}. Los casos pueden coincidir.</p>
+    <p>Incluidas: {{ participantes|length }}; activas del padrón actual no incluidas: {{ activos_omitidos|length }}; pendientes con WhatsApp único y activo: {{ whatsapp_listos }}. La selección de esta campaña no cambia al actualizar el padrón. Verifica altas, bajas y exclusiones antes de abrirla.</p>
+    {% if activos_omitidos %}<details class="clima-questions"><summary>Ver personas activas no incluidas ({{ activos_omitidos|length }})</summary><ul>{% for empleado in activos_omitidos %}<li>{{ empleado.nombre }} · {{ empleado.departamento|default:"Sin departamento" }}</li>{% endfor %}</ul></details>{% endif %}
+    {% if puede_decidir and not campana.recepcion_habilitada and not campana.envio_solicitado_en and not tiene_autorizaciones and not tiene_decisiones_participante %}<details class="clima-questions"><summary>Corregir selección del borrador</summary><p>Solo se puede editar antes de autorizar destinatarios. Las personas retiradas pierden la liga creada para este borrador.</p><form method="post" action="{% url 'rrhh:clima_accion' campana.pk %}#preparacion-clima" data-async-action>{% csrf_token %}<input type="hidden" name="accion" value="padron"><div class="clima-roster-list">{% for empleado in padron_actual %}<label class="clima-persona"><input type="checkbox" name="empleados" value="{{ empleado.id }}" {% if empleado.incluido %}checked{% endif %}><span><strong>{{ empleado.nombre }}</strong><small>{{ empleado.departamento|default:"Sin departamento" }}</small></span></label>{% endfor %}</div><button type="submit" class="btn btn-primary" data-pending-label="Guardando…">Guardar selección</button></form></details>{% endif %}
+    <p>El formato del teléfono no prueba su titularidad. Confirma los WhatsApp del lote antes de autorizarlos; también puedes corregir una autorización individual. Si RR. HH. cambia el número, la autorización deja de ser válida.</p>
   </section>
-  <section class="clima-section" aria-labelledby="participantes"><h2 id="participantes">Padrón de la campaña</h2>
+  <section class="clima-section" aria-labelledby="participantes"><h2 id="participantes">2. Preparar destinatarios (sin enviar)</h2>
     <p>{{ respondieron }} de {{ participantes|length }} respondieron. El nombre, departamento y sucursal son una foto del padrón al crearla; el contacto es actual.</p>
-    <div class="clima-roster-list">{% for persona in participantes %}<div class="clima-persona"><span><strong>{{ persona.nombre }}</strong><small>{{ persona.departamento|default:"Sin departamento" }} · {{ persona.sucursal|default:"Sin sucursal" }} · {% if persona.respondio %}Respondió{% else %}Pendiente{% endif %}</small>{% if not persona.respondio %}<small>Contacto personal: {{ persona.contacto_estado }}{% if persona.contacto_compartido %} · Compartido; revisar{% endif %}{% if persona.contacto_inactivo %} · Ya no está activa{% endif %}</small>{% endif %}<a href="{% url 'rrhh:clima_acceso_individual' campana.pk persona.pk %}">Ver liga y QR</a></span></div>{% endfor %}</div>
+    <p><strong>Contactos autorizados para un envío futuro: {{ autorizados }}.</strong> Intentos de invitación: {{ invitaciones_intentadas }}. Autorizar solo prepara los contactos: no abre la campaña, no envía WhatsApps y no finaliza el proceso. {% if not campana.envio_solicitado_en %}Para enviar después, hay que abrir la campaña en el paso 3 y solicitar el envío en el paso 4.{% endif %} Las respuestas siguen siendo anónimas; este registro solo muestra quién completó la encuesta.</p>
+    {% if pendientes_autorizacion %}<h3>Por autorizar ({{ pendientes_autorizacion|length }})</h3><div class="clima-roster-list">{% for persona in pendientes_autorizacion %}{% include "rrhh/_clima_persona.html" %}{% endfor %}</div>{% endif %}
+    {% if contactos_por_corregir %}<h3>Contactos por corregir ({{ contactos_por_corregir|length }})</h3><p>Estas personas no se autorizarán en lote hasta corregir su contacto en RR. HH.</p><div class="clima-roster-list">{% for persona in contactos_por_corregir %}{% include "rrhh/_clima_persona.html" %}{% endfor %}</div>{% endif %}
+    {% if not pendientes_autorizacion and not contactos_por_corregir %}<p>No hay autorizaciones ni contactos por corregir.</p>{% endif %}
+    {% if puede_decidir and not campana.envio_solicitado_en and lote_autorizables %}<form method="post" action="{% url 'rrhh:clima_accion' campana.pk %}#preparacion-clima" data-async-action class="clima-bulk-auth">{% csrf_token %}<input type="hidden" name="accion" value="autorizar_lote"><p><strong>{{ lote_autorizables }} personas incluidas con WhatsApp apto pendientes de autorización.</strong> {% if lote_revisar %}{{ lote_revisar }} requieren corregir su contacto y quedarán sin autorizar.{% endif %} Esta acción no abre la campaña ni envía mensajes.</p><label><input type="checkbox" name="titularidad_confirmada" value="si" required> Confirmo que revisé que los WhatsApp aptos del lote pertenecen a estas personas</label><button type="submit" class="btn btn-primary" data-pending-label="Autorizando…">Autorizar {{ lote_autorizables }} contactos aptos</button></form>{% endif %}
+    {% if otros_participantes %}<details class="clima-questions"><summary>Ver {% if otros_participantes|length == 1 %}la otra persona{% else %}las otras {{ otros_participantes|length }} personas{% endif %} de la campaña</summary><div class="clima-roster-list">{% for persona in otros_participantes %}{% include "rrhh/_clima_persona.html" %}{% endfor %}</div></details>{% endif %}
   </section>
-  <section class="clima-section" aria-labelledby="resultados"><h2 id="resultados">Resultados agregados</h2>
+  <section class="clima-section" aria-labelledby="apertura"><h2 id="apertura">3. Abrir campaña</h2><p>Al abrir, las ligas y QR podrán recibir respuestas completas hasta la fecha límite. Abrir no envía invitaciones.</p>{% if puede_decidir and not campana.recepcion_habilitada %}<form method="post" action="{% url 'rrhh:clima_accion' campana.pk %}#preparacion-clima" data-async-action data-confirm-message="¿Abrir la campaña para que las ligas acepten respuestas? No se enviará ningún mensaje.">{% csrf_token %}<input type="hidden" name="accion" value="abrir"><button type="submit" class="btn btn-primary" data-pending-label="Abriendo…">Abrir campaña</button></form>{% endif %}</section>
+  <section class="clima-section" aria-labelledby="envio">
+    <h2 id="envio">4. Enviar invitaciones</h2>
+    {% if campana.envio_solicitado_en %}
+      <div class="clima-send-status" role="status">
+        <strong>{% if not invitaciones_intentadas %}Envío solicitado · todavía sin intentos{% elif sin_intento %}Envío solicitado · {{ sin_intento }} {% if sin_intento == 1 %}pendiente{% else %}pendientes{% endif %} de intento{% else %}Envío procesado por el ERP{% endif %}</strong>
+        <span>Solicitud registrada el {{ campana.envio_solicitado_en|date:"d/m/Y H:i" }}. {% if not invitaciones_intentadas or sin_intento %}Actualiza esta página para ver el avance.{% else %}Revisa los resultados abajo.{% endif %}</span>
+      </div>
+    {% else %}
+      <p>Al enviar, el ERP intentará mandar una invitación a cada contacto autorizado. Esta acción se realiza una sola vez.</p>
+    {% endif %}
+    <div class="clima-send-counts" aria-label="Estado de las invitaciones">
+      <p><strong>{{ avisos_resumen.ENVIADO|default:0 }}</strong><span>Aceptadas por Meta</span></p>
+      <p><strong>{{ sin_intento }}</strong><span>Sin intento</span></p>
+      <p><strong>{{ avisos_resumen.FALLIDO|default:0 }}</strong><span>Fallidas</span></p>
+      <p><strong>{{ avisos_resumen.INCIERTO|default:0 }}</strong><span>Inciertas</span></p>
+    </div>
+    {% if not webhook_configurado %}
+      <p class="clima-send-caveat">{% if avisos_resumen.ENVIADO %}Meta aceptó el envío, pero todavía no podemos confirmar entrega ni lectura en el teléfono.{% else %}La entrega y lectura no se pueden confirmar hasta que Meta acepte un mensaje y se configure el seguimiento.{% endif %}</p>
+    {% else %}
+      <p>Confirmadas por Meta: {{ entrega_resumen.ENTREGADO|default:0 }} entregadas y {{ entrega_resumen.LEIDO|default:0 }} leídas. La lectura se refiere al mensaje de WhatsApp.</p>
+    {% endif %}
+    {% if puede_decidir %}
+      {% if not campana.envio_solicitado_en and campana.recepcion_habilitada and envios_habilitados %}
+        <form method="post" action="{% url 'rrhh:clima_accion' campana.pk %}#envio" data-async-action data-confirm-message="¿Enviar invitaciones por WhatsApp a los contactos autorizados de esta campaña?">{% csrf_token %}<input type="hidden" name="accion" value="enviar"><button type="submit" class="btn btn-primary" data-pending-label="Solicitando…">Enviar invitaciones por WhatsApp</button></form>
+      {% else %}
+        <button type="button" class="btn btn-secondary" disabled>Enviar invitaciones por WhatsApp</button>
+        {% if not campana.envio_solicitado_en %}<p>Para enviar: {% if not campana.recepcion_habilitada %}abre la campaña{% endif %}{% if not campana.recepcion_habilitada and not envios_habilitados %} y {% endif %}{% if not envios_habilitados %}habilita el canal Meta{% endif %}.</p>{% endif %}
+      {% endif %}
+    {% endif %}
+    <details class="clima-questions"><summary>Detalles de entrega y errores</summary>
+      <p>Sin canal vigente al intentar: {{ avisos_resumen.SIN_CANAL|default:0 }}. Meta confirmó como fallidas: {{ entrega_resumen.FALLIDO|default:0 }}.</p>
+      <p>«Aceptada por Meta» significa que la API recibió la invitación; no confirma entrega ni lectura. Los intentos inciertos no se repiten automáticamente. Si Meta marca fallida una invitación, revisa el contacto antes de contactar a la persona.</p>
+      {% if not webhook_configurado %}<p>La comprobación de entrega y lectura requiere configurar la suscripción de estados de Meta.</p>{% endif %}
+    </details>
+  </section>
+  <section class="clima-section" aria-labelledby="historial"><h2 id="historial">Decisiones registradas</h2>{% if eventos %}<ul>{% for evento in eventos %}<li>{{ evento.creado_en|date:"d/m/Y H:i" }} · {{ evento.actor }} · {{ evento.accion }} · {{ evento.detalle }}</li>{% endfor %}</ul>{% else %}<p>Aún no hay autorizaciones ni acciones de apertura o envío.</p>{% endif %}</section>
+  <section class="clima-section" aria-labelledby="resultados"><h2 id="resultados">Participación y resultados</h2>
+    <div class="clima-progress-heading"><p><strong>{{ respondieron }} de {{ participantes|length }}</strong> encuestas completas</p><span>{{ porcentaje_avance }} %</span></div>
+    <progress class="clima-progress" value="{{ respondieron }}" max="{{ participantes|length|default:1 }}" aria-label="{{ respondieron }} de {{ participantes|length }} encuestas completas"></progress>
+    <p class="clima-progress-note">El avance se actualiza al recargar la página. Solo se cuentan encuestas enviadas completas.</p>
     {% if resultados %}{% for grupo in resultados %}<details class="clima-questions"><summary>{{ grupo.nombre }} · {{ grupo.total }} respuestas</summary>
       <ol>{% for pregunta in grupo.preguntas %}<li>{{ pregunta.texto }}<ul>{% for opcion in pregunta.opciones %}<li>{{ opcion.texto }}: {{ opcion.total }} ({{ opcion.porcentaje }} %) <progress value="{{ opcion.porcentaje }}" max="100" aria-label="{{ opcion.texto }}: {{ opcion.porcentaje }} por ciento"></progress></li>{% endfor %}</ul></li>{% endfor %}</ol>
-    </details>{% endfor %}{% else %}<p>Los resultados se mostrarán al cerrar la recepción y reunir al menos cinco respuestas. Las respuestas abiertas requieren revisión de privacidad antes de publicarse.</p>{% endif %}
+    </details>{% endfor %}{% else %}<p>Las gráficas de respuestas se mostrarán después de cerrar la campaña y reunir al menos cinco encuestas completas. Así se protege la identidad de quienes contestan.</p>{% endif %}
   </section>
   <section class="clima-section" aria-labelledby="preguntas"><h2 id="preguntas">Preguntas guardadas</h2>
     {% for seccion in cuestionario.sections %}<details class="clima-questions"><summary>{{ seccion.title }} · {{ seccion.questions|length }} preguntas</summary><ol>{% for pregunta in seccion.questions %}<li>{{ pregunta.text }} <span>{% if pregunta.type == 'text' %}Respuesta abierta{% else %}Opciones: {{ pregunta.options|join:" · " }}{% endif %}</span></li>{% endfor %}</ol></details>{% endfor %}

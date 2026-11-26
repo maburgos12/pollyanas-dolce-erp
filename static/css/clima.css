@@ -15,6 +15,15 @@
 .clima-persona{display:flex;align-items:flex-start;gap:.75rem;padding:.65rem .8rem;border:1px solid #e9dedf;border-radius:8px;cursor:pointer}
 .clima-persona input{margin-top:.25rem;accent-color:#8b2252}
 .clima-persona span{display:flex;flex-direction:column;gap:.15rem}
+.clima-persona span{min-width:0;width:100%}
+.clima-persona form{display:flex;flex-direction:column;align-items:flex-start;gap:.45rem;margin:.45rem 0 0}
+.clima-persona form label{display:flex;align-items:flex-start;gap:.4rem;line-height:1.35}
+.clima-persona button,.clima-section button{min-height:44px}
+.clima-bulk-auth{display:flex;flex-direction:column;align-items:flex-start;gap:.65rem;margin:1rem 0;padding:1rem;border:1px solid #d9b8c5;border-radius:10px;background:#fff8fa}
+.clima-bulk-auth p{margin:0}
+.clima-bulk-auth label{display:flex;align-items:flex-start;gap:.5rem;line-height:1.4}
+.clima-bulk-auth input{margin-top:.25rem;accent-color:#8b2252}
+.clima-persona button:focus-visible,.clima-section button:focus-visible{outline:3px solid #c9a84c;outline-offset:2px}
 .clima-persona small{color:#66545a;font-size:.85rem}
 .clima-error{color:#9b1732;margin:.35rem 0}
 .clima-questions{border-top:1px solid #e9dedf;padding:.8rem 0}
@@ -24,5 +33,21 @@
 .clima-campanas{list-style:none;padding:0;margin:0}
 .clima-campanas li{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid #e9dedf;padding:.85rem 0}
 .clima-status{display:flex;flex-wrap:wrap;gap:.75rem;padding:1rem;background:#f8e8ee;border-radius:8px}
+.clima-send-status{display:flex;flex-direction:column;gap:.3rem;padding:.85rem 1rem;background:#f8e8ee;border:1px solid #d9b8c5;border-radius:8px;line-height:1.45}
+.clima-send-counts{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;margin:1rem 0}
+.clima-send-counts p{display:flex;flex-direction:column;gap:.1rem;margin:0;min-width:9rem}
+.clima-send-counts strong{font-size:1.4rem;line-height:1.2}
+.clima-send-counts span{font-size:.9rem;color:#66545a}
+.clima-send-caveat{max-width:65ch;color:#694450}
+
+.clima-progress-heading{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+.clima-progress-heading p{margin:.25rem 0 .5rem;font-size:1.1rem}
+.clima-progress-heading strong{font-size:1.45rem;color:#6d1740}
+.clima-progress-heading span{font-weight:700;color:#6d1740}
+.clima-progress{display:block;width:100%;height:1rem;overflow:hidden;border:0;border-radius:999px;background:#f0e2e7;accent-color:#8b2252}
+.clima-progress::-webkit-progress-bar{background:#f0e2e7;border-radius:999px}
+.clima-progress::-webkit-progress-value{background:#8b2252;border-radius:999px}
+.clima-progress::-moz-progress-bar{background:#8b2252;border-radius:999px}
+.clima-progress-note{font-size:.9rem;color:#66545a;margin:.55rem 0 1.2rem}
 .clima-qr{display:block;width:min(100%,240px);height:auto;margin:1rem 0}
 @media(max-width:600px){.clima-section{padding:1rem}.clima-campanas li{flex-direction:column}.clima-roster-list{max-height:500px}}
