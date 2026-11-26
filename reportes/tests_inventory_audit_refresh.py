@@ -135,6 +135,15 @@ class InventoryAuditRefreshMaterializationTests(TraceabilityTestFixtures, TestCa
             raw_payload={"row": ["116", "0116", "Bollo", "Bollo", "1", "PZA",
                                  "10", "10", "2026-10-01T02:18:44", "false"]})
         before = _source_signature(date(2026, 9, 1))
+        from pos_bridge.services.sync_service import _share_inventory_payloads
+
+        _share_inventory_payloads([snapshot])
+        PointInventorySnapshot.objects.filter(pk=snapshot.pk).update(
+            shared_payload=snapshot.shared_payload, raw_payload={})
+        self.assertEqual(before, _source_signature(date(2026, 9, 1)))
+        PointInventorySnapshot.objects.filter(pk=snapshot.pk).update(
+            shared_payload=None, raw_payload=snapshot.effective_raw_payload)
+        snapshot.refresh_from_db()
         payload = dict(snapshot.raw_payload)
         payload["row"] = list(payload["row"])
         payload["row"][8] = "2026-10-01T08:18:44"

@@ -97,7 +97,10 @@ def referencia_conteo(conteo, *, now=None):
         model = PointInsumoInventorySnapshot if insumos else PointInventorySnapshot
         field = 'insumo_id' if insumos else 'product_id'
         ids = [line.insumo_id if insumos else line.producto_id for line in subset]
-        rows = list(model.objects.filter(branch=branch, sync_job=job, **{field + '__in': ids}).order_by('id'))
+        rows_query = model.objects.filter(branch=branch, sync_job=job, **{field + '__in': ids})
+        if not insumos:
+            rows_query = rows_query.select_related('shared_payload')
+        rows = list(rows_query.order_by('id'))
         by_item = {}
         duplicates = set()
         for row in rows:
@@ -114,7 +117,8 @@ def referencia_conteo(conteo, *, now=None):
             if not row or identity in duplicates or row.captured_at > cutoff:
                 reading['error'] = 'Artículo ausente, duplicado o posterior al inicio en el ciclo.'
             else:
-                raw = leer_fila_point(row.raw_payload, codigo=line.codigo)
+                payload = row.raw_payload if insumos else row.effective_raw_payload
+                raw = leer_fila_point(payload, codigo=line.codigo)
                 amount_db = row.point_quantity if insumos else row.stock
                 if raw is None or raw[0] != amount_db:
                     reading['error'] = 'Cantidad o unidad sin evidencia Point consistente.'

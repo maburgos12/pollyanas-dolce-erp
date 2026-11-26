@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Count, Max, Sum, Q
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, next_month, month_start, POINT_BUSINESS_TIMEZONE
@@ -91,9 +92,11 @@ def _source_signature(month):
         snapshot_scope |= Q(captured_at__gte=lower, captured_at__lt=upper)
     snapshots = apps.get_model("pos_bridge", "PointInventorySnapshot")
     scoped_snapshots = snapshots.objects.filter(snapshot_scope)
-    evidence.append(list(scoped_snapshots.order_by("id").values_list(
+    evidence.append(list(scoped_snapshots.annotate(
+        resolved_payload=Coalesce("shared_payload__payload", "raw_payload"),
+    ).order_by("id").values_list(
         "id", "branch_id", "product_id", "stock", "sync_job_id", "captured_at",
-        "raw_payload", "product__external_id", "sync_job__status", "sync_job__job_type")))
+        "resolved_payload", "product__external_id", "sync_job__status", "sync_job__job_type")))
     # Snapshot boundary proof depends on the original branch extraction log.
     # Bulk hash its provenance too: raw/queryset edits must not remain fresh just
     # because they bypass save signals or do not change a job's updated_at.

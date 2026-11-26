@@ -46,11 +46,11 @@ def add_operational_opening_evidence(cutoff, groups):
         sync_job_id=81086, branch_id=28, product_id__in=pairs,
         captured_at=_CAPTURED_AT, sync_job__status=PointSyncJob.STATUS_SUCCESS,
         sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
-    ).select_related("product"))
+    ).select_related("product", "shared_payload"))
     counts = Counter(item.product_id for item in snapshots)
     eligible = {}
     for snapshot in snapshots:
-        raw = snapshot.raw_payload
+        raw = snapshot.effective_raw_payload
         row = raw.get("row") if isinstance(raw, dict) else None
         if (counts[snapshot.product_id] != 1 or not isinstance(row, list) or len(row) != 10
                 or raw.get("headers") != _HEADERS

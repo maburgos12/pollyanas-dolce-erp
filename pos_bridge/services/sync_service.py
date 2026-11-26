@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from datetime import date
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -23,6 +25,7 @@ from pos_bridge.models import (
     PointProduct,
     PointSyncJob,
 )
+from pos_bridge.services.inventory_payload_store import store_exact_inventory_payloads
 from pos_bridge.services.alert_service import PointAlertService
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
@@ -47,6 +50,17 @@ LOG_LEVELS = {
     PointExtractionLog.LEVEL_WARNING: logging.WARNING,
     PointExtractionLog.LEVEL_ERROR: logging.ERROR,
 }
+
+
+def _share_inventory_payloads(snapshots):
+    references = [snapshot for snapshot in snapshots if snapshot.raw_payload not in ({}, None)]
+    for start in range(0, len(references), 500):
+        batch = references[start:start + 500]
+        documents = [json.dumps(snapshot.raw_payload, allow_nan=False) for snapshot in batch]
+        payload_ids = store_exact_inventory_payloads(documents)
+        for snapshot, payload_id in zip(batch, payload_ids, strict=True):
+            snapshot.shared_payload_id = payload_id
+            snapshot.raw_payload = {}
 
 
 class PointSyncService:
@@ -192,6 +206,8 @@ class PointSyncService:
                 )
             )
 
+        if settings.POINT_INVENTORY_SHARE_PAYLOADS:
+            _share_inventory_payloads(snapshots_to_create)
         PointInventorySnapshot.objects.bulk_create(snapshots_to_create, batch_size=500)
         from reportes.services_inventory_audit_refresh import enqueue_inventory_audit_months
         enqueue_inventory_audit_months(snapshot_affected_months(branch_result.captured_at))

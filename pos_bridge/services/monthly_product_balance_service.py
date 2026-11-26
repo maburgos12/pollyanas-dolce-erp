@@ -143,7 +143,7 @@ def _snapshot_historical_boundaries(lines, *, cutoff, cache):
         captured_at__lte=cutoff + SNAPSHOT_BOUNDARY_WINDOW,
         sync_job__status=PointSyncJob.STATUS_SUCCESS,
         sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
-    ).select_related("branch", "product", "sync_job").order_by("captured_at", "id"))
+    ).select_related("branch", "product", "sync_job", "shared_payload").order_by("captured_at", "id"))
     provenance = {}
     for log in PointExtractionLog.objects.filter(
         sync_job_id__in={snapshot.sync_job_id for snapshot in snapshots},
@@ -161,7 +161,7 @@ def _snapshot_historical_boundaries(lines, *, cutoff, cache):
             for log in logs
         ):
             continue
-        raw = snapshot.raw_payload
+        raw = snapshot.effective_raw_payload
         if not isinstance(raw, dict):
             continue
         row, headers = raw.get("row"), raw.get("headers")
@@ -743,7 +743,7 @@ def _bracketed_original_empty_boundaries(lines, *, cutoff):
         pair_filter, captured_at__gte=bounds[0], captured_at__lte=bounds[1],
         sync_job__status=PointSyncJob.STATUS_SUCCESS,
         sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
-    ).select_related("branch", "product", "sync_job").order_by("captured_at", "id"))
+    ).select_related("branch", "product", "sync_job", "shared_payload").order_by("captured_at", "id"))
     provenance = {}
     for log in PointExtractionLog.objects.filter(
         sync_job_id__in={snapshot.sync_job_id for snapshot in snapshots},
@@ -759,7 +759,7 @@ def _bracketed_original_empty_boundaries(lines, *, cutoff):
         if key not in originals:
             continue
         logs = provenance.get((snapshot.sync_job_id, snapshot.branch_id), [])
-        raw = snapshot.raw_payload
+        raw = snapshot.effective_raw_payload
         row = raw.get("row") if isinstance(raw, dict) else None
         headers = raw.get("headers") if isinstance(raw, dict) else None
         try:
