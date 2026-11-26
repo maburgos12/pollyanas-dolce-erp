@@ -39,6 +39,22 @@ class PreparacionClimaTests(TestCase):
         self.assertEqual(sum(q["type"] == "choice" for s in campana.cuestionario["sections"] for q in s["questions"]), 23)
         self.assertEqual(sum(q["type"] == "text" for s in campana.cuestionario["sections"] for q in s["questions"]), 3)
 
+    def test_listado_distingue_campana_activa_de_borrador(self):
+        fecha = timezone.localdate() + timedelta(days=14)
+        CampanaClima.objects.create(
+            titulo="Campaña activa", fecha_cierre=fecha, cuestionario=QUESTIONNAIRE,
+            creada_por=self.admin, recepcion_habilitada=True, abierta_en=timezone.now(),
+        )
+        CampanaClima.objects.create(
+            titulo="Campaña pendiente", fecha_cierre=fecha, cuestionario=QUESTIONNAIRE,
+            creada_por=self.admin,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url)
+        self.assertNotContains(response, "Campañas en borrador")
+        self.assertContains(response, "Campaña activa</a><span>Activa")
+        self.assertContains(response, "Campaña pendiente</a><span>Borrador")
+
     def test_no_admite_empleado_inactivo(self):
         self.client.force_login(self.admin)
         response = self.client.post(self.url, {
@@ -146,8 +162,28 @@ class PreparacionClimaTests(TestCase):
         RespuestaClima.objects.create(campana=campana, departamento="PRODUCCION", respuestas={"q_0": "De acuerdo"})
         self.client.force_login(self.admin)
         response = self.client.get(reverse("rrhh:clima_detalle", args=[campana.pk]))
-        self.assertContains(response, "al menos cinco respuestas")
+        self.assertContains(response, "al menos cinco encuestas completas")
         self.assertNotContains(response, "De acuerdo: 1")
+
+    def test_resultados_muestran_avance_de_encuestas_completas_sin_revelar_respuestas(self):
+        campana = CampanaClima.objects.create(
+            titulo="Diciembre", fecha_cierre=timezone.localdate() + timedelta(days=14),
+            cuestionario=QUESTIONNAIRE, creada_por=self.admin, recepcion_habilitada=True,
+        )
+        for indice in range(57):
+            empleado = Empleado.objects.create(nombre=f"Persona {indice}")
+            ParticipanteClima.objects.create(
+                campana=campana, empleado=empleado, nombre=empleado.nombre,
+                respondio=indice < 9,
+            )
+            if indice < 9:
+                RespuestaClima.objects.create(campana=campana, departamento="Producción", respuestas={"q_0": "De acuerdo"})
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("rrhh:clima_detalle", args=[campana.pk]))
+        self.assertContains(response, "9 de 57")
+        self.assertContains(response, "16 %")
+        self.assertContains(response, 'value="9" max="57" aria-label="9 de 57 encuestas completas"')
+        self.assertNotContains(response, "Toda la campaña · 9 respuestas")
 
     def test_agregados_solo_al_cerrar_y_sin_areas_pequenas(self):
         campana = CampanaClima.objects.create(

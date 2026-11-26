@@ -137,6 +137,7 @@ def campanas_clima(request):
         "form": form, "empleados": empleados, "selected": selected,
         "cobertura": cobertura,
         "campanas": CampanaClima.objects.select_related("creada_por").annotate(total=Count("participantes"))[:20],
+        "hoy": timezone.localdate(),
         "cuestionario": QUESTIONNAIRE,
     })
 
@@ -186,6 +187,7 @@ def detalle_clima(request, pk):
     entrega_resumen = Counter(a.entrega_estado for a in avisos.values() if a.estado == "ENVIADO")
     sin_intento = sum(p.autorizacion_vigente and not p.respondio and p.pk not in avisos for p in participantes)
     respondieron = len(participantes) - cobertura["total"]
+    porcentaje_avance = round(respondieron * 100 / len(participantes)) if participantes else 0
     respuestas = list(campana.respuestas.values("departamento", "respuestas"))
     # No publicar un desglose que permita deducir el grupo pequeño por diferencia.
     areas = {}
@@ -211,6 +213,7 @@ def detalle_clima(request, pk):
         "participantes": participantes,
         "cobertura": cobertura,
         "respondieron": respondieron,
+        "porcentaje_avance": porcentaje_avance,
         "cerrada": cerrada,
         "resultados": resultados,
         "cuestionario": campana.cuestionario,

@@ -39,5 +39,15 @@
 .clima-send-counts strong{font-size:1.4rem;line-height:1.2}
 .clima-send-counts span{font-size:.9rem;color:#66545a}
 .clima-send-caveat{max-width:65ch;color:#694450}
+
+.clima-progress-heading{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+.clima-progress-heading p{margin:.25rem 0 .5rem;font-size:1.1rem}
+.clima-progress-heading strong{font-size:1.45rem;color:#6d1740}
+.clima-progress-heading span{font-weight:700;color:#6d1740}
+.clima-progress{display:block;width:100%;height:1rem;overflow:hidden;border:0;border-radius:999px;background:#f0e2e7;accent-color:#8b2252}
+.clima-progress::-webkit-progress-bar{background:#f0e2e7;border-radius:999px}
+.clima-progress::-webkit-progress-value{background:#8b2252;border-radius:999px}
+.clima-progress::-moz-progress-bar{background:#8b2252;border-radius:999px}
+.clima-progress-note{font-size:.9rem;color:#66545a;margin:.55rem 0 1.2rem}
 .clima-qr{display:block;width:min(100%,240px);height:auto;margin:1rem 0}
 @media(max-width:600px){.clima-section{padding:1rem}.clima-campanas li{flex-direction:column}.clima-roster-list{max-height:500px}}
