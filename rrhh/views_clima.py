@@ -188,6 +188,7 @@ def detalle_clima(request, pk):
     sin_intento = sum(p.autorizacion_vigente and not p.respondio and p.pk not in avisos for p in participantes)
     respondieron = len(participantes) - cobertura["total"]
     porcentaje_avance = round(respondieron * 100 / len(participantes)) if participantes else 0
+    seguimiento = sorted(participantes, key=lambda persona: (persona.respondio, persona.nombre))
     respuestas = list(campana.respuestas.values("departamento", "respuestas"))
     # No publicar un desglose que permita deducir el grupo pequeño por diferencia.
     areas = {}
@@ -213,6 +214,8 @@ def detalle_clima(request, pk):
         "participantes": participantes,
         "cobertura": cobertura,
         "respondieron": respondieron,
+        "pendientes_respuesta": len(participantes) - respondieron,
+        "seguimiento": seguimiento,
         "porcentaje_avance": porcentaje_avance,
         "cerrada": cerrada,
         "resultados": resultados,

@@ -7,6 +7,18 @@
 <div class="clima-page">
   <p><a href="{% url 'rrhh:clima_campanas' %}">← Volver a campañas</a></p>
   <div class="clima-status" role="status"><strong>{% if cerrada %}Campaña cerrada{% else %}Recepción habilitada{% endif %}</strong><span>Fecha límite: {{ campana.fecha_cierre|date:"d/m/Y" }}. {% if cerrada %}Las ligas y QR no aceptan respuestas.{% endif %} {% if campana.envio_solicitado_en %}Envío solicitado el {{ campana.envio_solicitado_en|date:"d/m/Y H:i" }}.{% else %}No se ha solicitado el envío.{% endif %}</span></div>
+  <section class="clima-section" id="seguimiento-clima" aria-labelledby="seguimiento-titulo">
+    <h2 id="seguimiento-titulo">Seguimiento de respuestas</h2>
+    <p class="clima-followup-summary"><strong>{{ pendientes_respuesta }} {% if pendientes_respuesta == 1 %}pendiente{% else %}pendientes{% endif %}</strong> · {{ respondieron }} {% if respondieron == 1 %}respondió{% else %}respondieron{% endif %} de {{ participantes|length }} personas.</p>
+    <p>Esta lista muestra quién completó la encuesta. No muestra ni relaciona sus respuestas.</p>
+    <div class="table-responsive clima-followup-scroll">
+      <table class="clima-followup-table">
+        <caption>Personas incluidas en {{ campana.titulo }}</caption>
+        <thead><tr><th scope="col">Persona</th><th scope="col">Estado</th></tr></thead>
+        <tbody>{% for persona in seguimiento %}<tr><td><strong>{{ persona.nombre }}</strong><small>{{ persona.departamento|default:"Sin departamento" }} · {{ persona.sucursal|default:"Sin sucursal" }}</small></td><td><span class="clima-followup-state{% if persona.respondio %} clima-followup-state--done{% endif %}">{% if persona.respondio %}Respondió{% else %}Pendiente{% endif %}</span></td></tr>{% empty %}<tr><td colspan="2">No hay personas incluidas en esta campaña.</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
   <section class="clima-section" id="preparacion-clima" aria-labelledby="cobertura"><h2 id="cobertura">1. Revisar padrón y contactos</h2>
     <p>Pendientes: {{ cobertura.total }}; con contacto personal de formato utilizable y no compartido: {{ cobertura.listos }}; sin contacto: {{ cobertura.sin_contacto }}; con dato compartido: {{ cobertura.compartidos }}; ya inactivas: {{ cobertura.inactivos }}. Los casos pueden coincidir.</p>
     <p>Incluidas: {{ participantes|length }}; activas del padrón actual no incluidas: {{ activos_omitidos|length }}; pendientes con WhatsApp único y activo: {{ whatsapp_listos }}. La selección de esta campaña no cambia al actualizar el padrón. Verifica altas, bajas y exclusiones antes de abrirla.</p>

@@ -120,3 +120,5 @@ El envío inmediato de clima se enruta a la cola `notificaciones`, igual que el 
 El detalle de clima muestra en la sección de resultados una barra con encuestas completas, total de participantes y porcentaje calculado desde el estado de participación ya guardado. El conteo se actualiza al recargar la página; las respuestas y gráficas por pregunta conservan el umbral de privacidad y no se publican durante la recepción abierta. La barra no identifica contenido ni confirma entrega de WhatsApp.
 
 El listado de campañas muestra el estado real de cada una: borrador antes de abrir, activa durante recepción, vencida tras la fecha límite y cerrada si una campaña previamente abierta se cierra. La cabecera ya no llama borradores a toda la lista.
+
+El detalle de clima incluye una tabla de seguimiento de las personas incluidas, con nombre, área, sucursal y estado Respondió/Pendiente. Las filas pendientes aparecen primero; la tabla se alimenta del indicador de participación y no consulta ni presenta el contenido de RespuestaClima. La lista sigue siendo visible solo a usuarios autorizados de RR. HH.

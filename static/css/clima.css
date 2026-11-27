@@ -33,6 +33,17 @@
 .clima-campanas{list-style:none;padding:0;margin:0}
 .clima-campanas li{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid #e9dedf;padding:.85rem 0}
 .clima-status{display:flex;flex-wrap:wrap;gap:.75rem;padding:1rem;background:#f8e8ee;border-radius:8px}
+.clima-followup-summary{margin:.25rem 0 .5rem}
+.clima-followup-summary strong{color:#6d1740}
+.clima-followup-scroll{max-height:29rem;overflow:auto;border:1px solid #e9dedf;border-radius:8px}
+.clima-followup-table{width:100%;border-collapse:collapse;text-align:left}
+.clima-followup-table caption{padding:.65rem .85rem;text-align:left;color:#66545a;font-size:.9rem}
+.clima-followup-table th{position:sticky;top:0;z-index:1;background:#f8f4f5;font-size:.9rem}
+.clima-followup-table th,.clima-followup-table td{padding:.65rem .85rem;border-top:1px solid #e9dedf;vertical-align:top}
+.clima-followup-table td:last-child,.clima-followup-table th:last-child{width:9rem}
+.clima-followup-table td small{display:block;color:#66545a;font-size:.85rem;margin-top:.15rem}
+.clima-followup-state{display:inline-block;padding:.2rem .55rem;border-radius:999px;background:#f8e8ee;color:#6d1740;font-weight:700;font-size:.85rem}
+.clima-followup-state--done{background:#e8f2ed;color:#285842}
 .clima-send-status{display:flex;flex-direction:column;gap:.3rem;padding:.85rem 1rem;background:#f8e8ee;border:1px solid #d9b8c5;border-radius:8px;line-height:1.45}
 .clima-send-counts{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;margin:1rem 0}
 .clima-send-counts p{display:flex;flex-direction:column;gap:.1rem;margin:0;min-width:9rem}
