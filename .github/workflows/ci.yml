@@ -112,6 +112,7 @@ jobs:
         run: node scripts/tests/logistica_point_consumer.cjs
       - name: Verify backup and full-suite partition contracts
         run: |
+          python -m unittest discover -s scripts/tests -p test_ci_test_shards.py
           python -m unittest discover -s scripts/tests -p test_backup_db.py
           python -m unittest discover -s scripts/tests -p test_vps_backup_health.py
           python -m unittest discover -s scripts/tests -p test_rotate_verified_backups.py
