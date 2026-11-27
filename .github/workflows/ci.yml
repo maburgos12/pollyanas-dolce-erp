@@ -176,7 +176,7 @@ jobs:
       # One database setup per job; keepdb avoids legacy open-connection DROP errors.
       - name: Run full-suite shard (bloqueante)
         run: >-
-          python manage.py test --keepdb --noinput --timing
+          python manage.py test --keepdb --noinput --timing --durations 25
           --testrunner scripts.ci_test_runner.ShardedDiscoverRunner
           --shard-count 4 --shard-index ${{ matrix.shard }}
           --shard-manifest shard-${{ matrix.shard }}.json

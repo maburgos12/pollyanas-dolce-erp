@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.ci_test_runner import ShardedDiscoverRunner
+from scripts.ci_test_runner import ShardedDiscoverRunner, TimedTestSuite
 from scripts.ci_test_shards import partition_tests, verify_manifests
 
 
@@ -70,3 +70,58 @@ class ShardTests(unittest.TestCase):
         for options in ({"shard_index": 2}, {"parallel": 2}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 ShardedDiscoverRunner(**(dict(shard_count=2, shard_index=0, shard_manifest="unused") | options))
+
+
+class TimingTests(unittest.TestCase):
+    def test_class_timing_includes_fixtures_and_keeps_failure_and_skip_results(self):
+        events = []
+        class Example(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                events.append("setup")
+                cls.addClassCleanup(events.append, "cleanup")
+            @classmethod
+            def tearDownClass(cls):
+                events.append("teardown")
+            def test_failure(self):
+                self.fail("expected failure")
+            @unittest.skip("expected skip")
+            def test_skip(self):
+                pass
+        suite = TimedTestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(Example))
+        result = suite.run(unittest.TestResult())
+        self.assertEqual(result.testsRun, 2)
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(events, ["setup", "teardown", "cleanup"])
+        name = f"{Example.__module__}.{Example.__qualname__}"
+        self.assertGreater(suite.class_seconds[name], 0)
+        self.assertGreater(suite.fixture_seconds[name]["setup"], 0)
+        self.assertGreater(suite.fixture_seconds[name]["teardown"], 0)
+
+    def test_failed_class_setup_still_reports_time_and_original_error(self):
+        class Broken(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                raise RuntimeError("fixture failure")
+            def test_unreachable(self):
+                self.fail("must not run")
+        suite = TimedTestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(Broken))
+        result = suite.run(unittest.TestResult())
+        self.assertEqual(result.testsRun, 0)
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("fixture failure", result.errors[0][1])
+        self.assertEqual(len(suite.class_seconds), 1)
+
+    def test_runner_persists_timings_and_real_outcomes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(json.dumps({"selected": ["preserved"]}))
+            runner = ShardedDiscoverRunner(shard_count=1, shard_index=0, shard_manifest=path, verbosity=0)
+            result = runner.run_suite(runner.test_suite(cases("Profiled", 2)))
+            manifest = json.loads(path.read_text())
+            self.assertTrue(result.wasSuccessful())
+            self.assertEqual(manifest["selected"], ["preserved"])
+            self.assertEqual(manifest["outcomes"]["run"], 2)
+            self.assertEqual(len(manifest["class_seconds"]), 1)
+            self.assertEqual(len(manifest["test_seconds"]), 2)
