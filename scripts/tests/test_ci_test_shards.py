@@ -29,6 +29,25 @@ class ShardTests(unittest.TestCase):
         tests = cases("Existing", 2) + cases("New", 3)
         self.assertEqual(sum(map(len, partition_tests(tests, 4))), 5)
 
+    def test_measured_weights_balance_slow_small_classes_without_changing_coverage(self):
+        tests = cases("HeavyA", 1) + cases("HeavyB", 1) + cases("FastA", 20) + cases("FastB", 20)
+        weights = {f"{type(test).__module__}.{type(test).__qualname__}":
+                   (100 if type(test).__name__.startswith("Heavy") else 2)
+                   for test in tests}
+        shards = partition_tests(tests, 2, weights)
+        self.assertEqual(sorted(t.id() for shard in shards for t in shard), sorted(t.id() for t in tests))
+        self.assertEqual([sum(type(t).__name__.startswith("Heavy") for t in shard) for shard in shards], [1, 1])
+        self.assertEqual([len(shard) for shard in shards], [21, 21])
+        self.assertEqual(shards, partition_tests(tests, 2, weights))
+
+    def test_invalid_weights_fail_closed_and_new_classes_still_run(self):
+        tests = cases("NewClass", 2)
+        name = f"{type(tests[0]).__module__}.{type(tests[0]).__qualname__}"
+        for bad in (-1, 0, float("nan"), float("inf"), "5", True):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                partition_tests(tests, 2, {name: bad})
+        self.assertEqual(sum(map(len, partition_tests(tests, 2, {"OldClass": 10}))), 2)
+
     def test_invalid_count(self):
         with self.assertRaises(ValueError):
             partition_tests([], 0)
@@ -46,7 +65,7 @@ class ShardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify_manifests(paths[:1], 2)
             for change in ({"index": 0}, {"selected": []}, {"selected": ["a"]},
-                           {"discovered": ["a", "c"]}, {"count": 3}):
+                           {"discovered": ["a", "c"]}, {"count": 3}, {"partition": {"weights_sha256": "different"}}):
                 with self.subTest(change=change):
                     save([baseline[0], baseline[1] | change])
                     with self.assertRaises(ValueError):
@@ -125,3 +144,24 @@ class TimingTests(unittest.TestCase):
             self.assertEqual(manifest["outcomes"]["run"], 2)
             self.assertEqual(len(manifest["class_seconds"]), 1)
             self.assertEqual(len(manifest["test_seconds"]), 2)
+
+
+class WeightedRunnerTests(unittest.TestCase):
+    def test_runner_reads_versioned_weights_and_records_partition_provenance(self):
+        tests = cases("Heavy", 1) + cases("Fast", 4)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = root / "weights.json"
+            profile.write_text(json.dumps({"schema": 1, "class_seconds": {
+                f"{type(tests[0]).__module__}.{type(tests[0]).__qualname__}": 100}}))
+            manifest = root / "manifest.json"
+            runner = ShardedDiscoverRunner(shard_count=2, shard_index=0, shard_manifest=manifest,
+                                           shard_weights=profile, verbosity=0)
+            with patch("django.test.runner.DiscoverRunner.build_suite", return_value=unittest.TestSuite(tests)):
+                selected = list(runner.build_suite())
+            self.assertEqual(len(selected), 1)
+            self.assertEqual(len(json.loads(manifest.read_text())["partition"]["weights_sha256"]), 64)
+            profile.write_text(json.dumps({"schema": 2, "class_seconds": {}}))
+            with self.assertRaises(ValueError):
+                ShardedDiscoverRunner(shard_count=2, shard_index=0, shard_manifest=manifest,
+                                      shard_weights=profile, verbosity=0)

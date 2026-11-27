@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      partition:
+        description: Partition by measured class duration or original case count
+        type: choice
+        options: [duration, count]
+        default: duration
 
 permissions:
   contents: read
@@ -175,11 +181,21 @@ jobs:
       # Full discovery includes cierre inventario and performance-tagged tests.
       # One database setup per job; keepdb avoids legacy open-connection DROP errors.
       - name: Run full-suite shard (bloqueante)
-        run: >-
-          python manage.py test --keepdb --noinput --timing --durations 25
-          --testrunner scripts.ci_test_runner.ShardedDiscoverRunner
-          --shard-count 4 --shard-index ${{ matrix.shard }}
-          --shard-manifest shard-${{ matrix.shard }}.json
+        env:
+          PARTITION: ${{ inputs.partition || 'duration' }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        shell: bash
+        run: |
+          weights=()
+          case "$PARTITION" in
+            duration) weights=(--shard-weights scripts/ci_class_durations.json) ;;
+            count) ;;
+            *) echo "Unknown partition: $PARTITION" >&2; exit 1 ;;
+          esac
+          python manage.py test --keepdb --noinput --timing --durations 25 \
+            --testrunner scripts.ci_test_runner.ShardedDiscoverRunner \
+            --shard-count 4 --shard-index "$SHARD_INDEX" \
+            --shard-manifest "shard-$SHARD_INDEX.json" "${weights[@]}"
       - name: Preserve discovered and assigned test inventory
         if: always()
         uses: actions/upload-artifact@v4

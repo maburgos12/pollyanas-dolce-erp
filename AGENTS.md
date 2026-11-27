@@ -57,6 +57,11 @@ las tareas. El índice sólo enruta; no sustituye leer el destino ni comprobar f
 Si hay varios módulos, cumplir la unión de reglas y resolver contradicciones antes
 de editar; ninguna guía permite ampliar el alcance autorizado.
 
+## Contrato de validación
+
+Estándar adoptado: `2026-11-27.1`. Consultar el
+[contrato de comandos, gates y medición](docs/agents/validation.md).
+
 ## Entorno y entrega
 
 - Implementar exclusivamente en rama `codex/<modulo>-<descripcion>` y worktree
