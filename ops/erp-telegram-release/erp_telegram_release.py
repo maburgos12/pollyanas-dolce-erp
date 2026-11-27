@@ -443,13 +443,15 @@ def deploy(release, base):
         raise ValueError('production_sha_mismatch')
 
 
-def publish(nonce, api, ledger, deployer=deploy, production=production_sha):
+def publish(nonce, api, ledger, deployer=None, production=production_sha):
     with ledger.lock():
         row = ledger.read(nonce)
         if row['state'] not in {'approved', 'rejected'}:
             return row
         expired = int(time.time()) >= row['expires']
         decision = row['state']
+        if decision == 'approved' and not expired and deployer is None:
+            raise ValueError('supervised_deployer_required')
         row['state'] = 'executing'  # Persist before the first external mutation; never auto-repeat.
         ledger.write(row)
     try:
@@ -643,7 +645,11 @@ def main():
             row = request_release(args.pr, api, ledger, config, telegram)
         print(json.dumps({'nonce': row['nonce'], 'state': row['state'], 'head_sha': row['head_sha']}))
     else:
-        worker(api, ledger, config, telegram)
+        from erp_release_worker import run
+        try:
+            run(api, ledger, config, telegram)
+        except BlockingIOError:
+            print('Supervised publisher busy; decisions preserved for the next tick.', flush=True)
 
 
 if __name__ == '__main__':

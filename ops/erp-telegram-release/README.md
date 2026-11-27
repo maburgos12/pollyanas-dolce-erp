@@ -263,3 +263,8 @@ una versión antigua no comprende el nuevo estado `deferred` de limpieza.
 Las solicitudes históricas conservan su vencimiento firmado. Una solicitud de la tarde
 que siga vigente a las 07:00 no se duplica: al vencer, se revalida antes de emitir
 otra durante el horario permitido. Las decisiones previas no se renuevan.
+
+## Supervisión del publicador recurrente
+
+El worker requiere el callback seguro; no utiliza el deployer predeterminado.
+Ver [perfil, candados, instalación y recuperación](../../docs/runbooks/erp-supervised-publisher.md).

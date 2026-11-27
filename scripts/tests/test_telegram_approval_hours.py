@@ -339,12 +339,14 @@ class RefreshInstallTests(unittest.TestCase):
             source = root / 'app/ops/erp-telegram-release'
             target, units = root / 'installed', root / 'units'
             for path in (source, target, units): path.mkdir(parents=True)
-            for name in ('erp_telegram_release.py', 'erp_telegram_cleanup.py'):
+            for name in installer.MODULES:
                 (source / name).write_text('updated = True\n')
                 (target / name).write_text('old = True\n')
             timer = 'erp-telegram-release.timer'
             (source / timer).write_text('new timer')
             (units / timer).write_text('old timer')
+            (source / 'erp-telegram-release.service').write_text('new service')
+            (units / 'erp-telegram-release.service').write_text('old service')
             consumer = target / 'decidir_corte_point.py'
             consumer.write_text('from erp_telegram_release import handle\nfrom erp_telegram_cleanup import handle\n# Mac-IA preserved\n')
             original = consumer.read_bytes()
@@ -358,7 +360,7 @@ class RefreshInstallTests(unittest.TestCase):
             calls = []
             def run(command, **kwargs):
                 calls.append(command)
-                return Mock(returncode=0, stdout=fixture.M if command[-2:] == ['rev-parse', 'HEAD'] else '')
+                return Mock(returncode=0, stdout=fixture.M if command[-2:] == ['rev-parse', 'HEAD'] else ('inactive' if '--property=ActiveState' in command else ''))
             with patch.object(installer, 'check_policy'):
                 installer.refresh(source, row['nonce'], target, units, run, state, root / 'deploy.lock')
             self.assertEqual(consumer.read_bytes(), original)

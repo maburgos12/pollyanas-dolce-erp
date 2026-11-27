@@ -93,20 +93,37 @@ wait_for_web() {
   return 1
 }
 
+acquire_deployment_lock() {
+  local inherited="${1:-}" path="${ERP_DEPLOY_LOCK:-/run/lock/erp-deploy.lock}"
+  if [[ -n "$inherited" ]]; then
+    [[ "$inherited" =~ ^[0-9]+$ ]] || return 2
+    [[ "$(stat -Lc '%d:%i' "/proc/$$/fd/$inherited")" == "$(stat -Lc '%d:%i' "$path")" ]] || return 2
+    flock -n "$inherited" || return 1
+  else
+    exec 9>"$path"
+    flock -n 9 || { echo "another deployment is running" >&2; return 1; }
+  fi
+}
+
 main() {
   local app_dir="${APP_DIR:-/opt/pastelerias-erp}"
   local compose_file="${COMPOSE_FILE:-$app_dir/docker-compose.yml}"
-  local old_head new_head changed_files expected_sha="" expected_base=""
+  local old_head new_head changed_files expected_sha="" expected_base="" supervised_lock_fd=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --expected-sha) [[ $# -ge 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || return 2; expected_sha="$2"; shift 2 ;;
       --expected-base) [[ $# -ge 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || return 2; expected_base="$2"; shift 2 ;;
+      --supervised-lock-fd) [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || return 2; supervised_lock_fd="$2"; shift 2 ;;
       *) echo "unknown deployment argument" >&2; return 2 ;;
     esac
   done
   # All invocations, including manual deployments, share this lock.
-  exec 9>"${ERP_DEPLOY_LOCK:-/run/lock/erp-deploy.lock}"
-  flock -n 9 || { echo "another deployment is running" >&2; return 1; }
+  if [[ -n "$supervised_lock_fd" ]]; then
+    # The supervisor keeps this same open-file-description locked from preflight
+    # through runtime verification. Never release it between warm and deployment.
+    [[ -n "$expected_sha" && -n "$expected_base" ]] || return 2
+  fi
+  acquire_deployment_lock "$supervised_lock_fd" || return $?
   local -a compose=(docker compose -f "$compose_file")
 
   cd "$app_dir" || return 1
