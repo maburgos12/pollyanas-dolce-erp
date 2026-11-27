@@ -108,6 +108,17 @@
         const actions = document.createElement('div');
         actions.className = 'equipo-actions';
         const button = (label, handler) => { const b = text(actions, 'button', label); b.type = 'button'; b.className = 'btn'; b.addEventListener('click', handler); };
+        if (esPermiso()) {
+          const url = `/rrhh/mi-equipo/permisos/${item.id}/imprimir/`;
+          for (const [label, href] of [['Vista carta', url], ['Imprimir / PDF', `${url}?imprimir=1`]]) {
+            const link = text(actions, 'a', label);
+            link.className = 'btn';
+            link.href = href;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.setAttribute('aria-label', `${label} · ${item.folio} · ${item.empleado_nombre} (nueva pestaña)`);
+          }
+        }
         if (item.puede_editar) button('Corregir', () => openEditor(item));
         if (item.puede_preautorizar || item.puede_autorizar) button('Autorizar', () => resolve(item, esPermiso() ? 'preautorizar' : 'autorizar'));
         if (item.puede_preautorizar || item.puede_rechazar) button('Rechazar', () => resolve(item, 'rechazar'));
