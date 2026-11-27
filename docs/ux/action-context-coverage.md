@@ -122,3 +122,9 @@ El detalle de clima muestra en la sección de resultados una barra con encuestas
 El listado de campañas muestra el estado real de cada una: borrador antes de abrir, activa durante recepción, vencida tras la fecha límite y cerrada si una campaña previamente abierta se cierra. La cabecera ya no llama borradores a toda la lista.
 
 El detalle de clima incluye una tabla de seguimiento de las personas incluidas, con nombre, área, sucursal y estado Respondió/Pendiente. Las filas pendientes aparecen primero; la tabla se alimenta del indicador de participación y no consulta ni presenta el contenido de RespuestaClima. La lista sigue siendo visible solo a usuarios autorizados de RR. HH.
+
+### Logística — combustible sin turno (27/11/2026)
+
+- Captura administrativa con permisos existentes de DG/Administración y gestión de Bitácoras: `data-async-action`, toast global, botón Guardando…, recibo en el mismo panel. Error JSON conserva campos y foto; fallback HTML conserva valores y vuelve a `#combustible-captura` tras éxito.
+- Una sola función registra carga y AuditLog bajo transacción. Hash y estación/folio frenan reintentos; no genera bitácora ni kilometraje. Responsable de carga y autor son distintos.
+- Cargas sin turno visibles con filtros propios de fecha de consumo; no se incluyen al filtrar turnos abiertos/cerrados. Auditoría automática y conciliación permanecen pendientes de evidencia independiente.

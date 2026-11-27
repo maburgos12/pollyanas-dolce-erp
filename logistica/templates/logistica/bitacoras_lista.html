@@ -17,6 +17,7 @@
       <p class="pd-eyebrow">Logística · Bitácoras</p>
       <h1 class="pd-page-title">Bitácoras salida/llegada</h1>
       <p class="pd-page-copy">Registros de turno capturados desde celular, consultables dentro del ERP.</p>
+      {% if puede_corregir_combustible %}<a class="btn btn-primary" href="{% url 'logistica:combustible_nuevo' %}">Registrar carga sin turno</a>{% endif %}
     </div>
   </header>
 
@@ -61,6 +62,27 @@
         <a class="btn btn-secondary" href="{% url 'logistica:bitacoras_lista' %}">Limpiar</a>
       </div>
     </form>
+  </section>
+
+  <section id="cargas-sin-turno" class="pd-work-panel logi-bitacoras-results">
+    <h2>Cargas sin turno</h2>
+    <p class="muted">Tickets registrados por Administración. Se incluyen en el total de combustible con los filtros seleccionados.</p>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead><tr><th>Carga</th><th>Fecha del ticket</th><th>Unidad</th><th>Responsable</th><th>Estación / folio</th><th>Litros</th><th>Importe</th><th>Ticket</th></tr></thead>
+        <tbody>{% for carga in cargas_sin_turno %}
+          <tr><td>#{{ carga.pk }}{% if puede_corregir_combustible %}<br><a href="{% url 'logistica:combustible_editar' carga.pk %}">Corregir</a>{% endif %}</td>
+          <td>{{ carga.fecha_consumo|date:"d/m/Y H:i" }}</td><td>{{ carga.unidad.codigo }}</td><td>{{ carga.repartidor }}</td>
+          <td>{{ carga.estacion }} · {{ carga.folio_ticket }}</td><td>{{ carga.litros }} L</td><td>${{ carga.importe_total|floatformat:2|intcomma }}</td>
+          <td>{% if carga.foto_ticket %}<a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener">Ver ticket</a>{% endif %}<br>{{ carga.get_auditoria_estado_display }}</td></tr>
+        {% empty %}<tr><td colspan="8">No hay cargas sin turno con esos filtros.</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+    {% if cargas_sin_turno.has_other_pages %}<nav aria-label="Páginas de cargas sin turno">
+      {% if cargas_sin_turno.has_previous %}<a href="?unidad={{ filters.unidad }}&amp;repartidor={{ filters.repartidor }}&amp;fecha_desde={{ filters.fecha_desde }}&amp;fecha_hasta={{ filters.fecha_hasta }}&amp;cargas_page={{ cargas_sin_turno.previous_page_number }}#cargas-sin-turno">Anterior</a>{% endif %}
+      <span>Página {{ cargas_sin_turno.number }} de {{ cargas_sin_turno.paginator.num_pages }}</span>
+      {% if cargas_sin_turno.has_next %}<a href="?unidad={{ filters.unidad }}&amp;repartidor={{ filters.repartidor }}&amp;fecha_desde={{ filters.fecha_desde }}&amp;fecha_hasta={{ filters.fecha_hasta }}&amp;cargas_page={{ cargas_sin_turno.next_page_number }}#cargas-sin-turno">Siguiente</a>{% endif %}
+    </nav>{% endif %}
   </section>
 
   <section class="pd-work-panel logi-bitacoras-results">
