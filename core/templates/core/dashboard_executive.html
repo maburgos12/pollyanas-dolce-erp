@@ -8,7 +8,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/sales_confidence.css?v=20261004-v1">
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/core-templates-core-dashboard-executive.css?v=20260703-hero-mobile-center-v2">
+<link rel="stylesheet" href="/static/css/template_modules/core-templates-core-dashboard-executive.css?v=20261127-duo-v3">
 {% endblock %}
 
 {% block content %}
@@ -260,9 +260,10 @@
         <article class="home-exec-list-item home-exec-list-item--tight {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.month_label }}</strong>
-            <div class="home-exec-subtle">
-              {{ row.month_label|slice:":4" }} {% if row.amount is not None %}${{ row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %} · {{ row.month_label|slice:":4"|add:"-1" }} {% if row.prev_amount is not None %}${{ row.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}
-              {% if row.is_partial %}· corte parcial{% endif %}
+            <div class="home-exec-subtle home-exec-year-comparison">
+              <span>{{ row.month_label|slice:":4" }} {% if row.amount is not None %}${{ row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</span>
+              <span>{{ row.month_label|slice:":4"|add:"-1" }} {% if row.prev_amount is not None %}${{ row.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</span>
+              {% if row.is_partial %}<span>Corte parcial</span>{% endif %}
             </div>
           </div>
           <div class="home-exec-metric-pill {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}success{% else %}warning{% endif %}">
