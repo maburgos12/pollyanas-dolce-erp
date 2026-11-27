@@ -11,7 +11,7 @@
     <h2 id="seguimiento-titulo">Seguimiento de respuestas</h2>
     <p class="clima-followup-summary"><strong>{{ pendientes_respuesta }} {% if pendientes_respuesta == 1 %}pendiente{% else %}pendientes{% endif %}</strong> · {{ respondieron }} {% if respondieron == 1 %}respondió{% else %}respondieron{% endif %} de {{ participantes|length }} personas.</p>
     <p>Esta lista muestra quién completó la encuesta. No muestra ni relaciona sus respuestas.</p>
-    <div class="table-responsive clima-followup-scroll">
+    <div class="table-responsive clima-followup-scroll" tabindex="0" role="region" aria-label="Lista de personas y estado de respuesta">
       <table class="clima-followup-table">
         <caption>Personas incluidas en {{ campana.titulo }}</caption>
         <thead><tr><th scope="col">Persona</th><th scope="col">Estado</th></tr></thead>

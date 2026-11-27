@@ -35,7 +35,8 @@
 .clima-status{display:flex;flex-wrap:wrap;gap:.75rem;padding:1rem;background:#f8e8ee;border-radius:8px}
 .clima-followup-summary{margin:.25rem 0 .5rem}
 .clima-followup-summary strong{color:#6d1740}
-.clima-followup-scroll{max-height:29rem;overflow:auto;border:1px solid #e9dedf;border-radius:8px}
+.main-content[data-hallmark-scope="erp"] .table-responsive.clima-followup-scroll{max-height:29rem;overflow-x:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;border:1px solid #e9dedf;border-radius:8px}
+.clima-followup-scroll:focus-visible{outline:3px solid #c9a84c;outline-offset:2px}
 .clima-followup-table{width:100%;border-collapse:collapse;text-align:left}
 .clima-followup-table caption{padding:.65rem .85rem;text-align:left;color:#66545a;font-size:.9rem}
 .clima-followup-table th{position:sticky;top:0;z-index:1;background:#f8f4f5;font-size:.9rem}
