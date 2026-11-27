@@ -1196,7 +1196,7 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
 class LogisticaCargaCombustibleSerializer(serializers.ModelSerializer):
     unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
     repartidor_nombre = serializers.SerializerMethodField()
-    bitacora_folio = serializers.CharField(source="bitacora.folio", read_only=True)
+    bitacora_folio = serializers.CharField(source="bitacora.folio", read_only=True, allow_null=True)
 
     class Meta:
         model = CargaCombustibleUnidad

@@ -874,9 +874,9 @@ class PresupuestoRealConsolidacionService:
 
         return {
             fila["unidad__codigo"]: fila["importe"] or Decimal("0")
-            for fila in CargaCombustibleUnidad.objects.filter(
-                fecha_registro__year=periodo.year,
-                fecha_registro__month=periodo.month,
+            for fila in CargaCombustibleUnidad.objects.con_fecha_consumo().filter(
+                _fecha_consumo__year=periodo.year,
+                _fecha_consumo__month=periodo.month,
             )
             .values("unidad__codigo")
             .annotate(importe=Sum("importe_total"))

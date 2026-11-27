@@ -168,7 +168,7 @@ def decision_status(row, now=None):
     return {
         'executing': 'Publicación en curso; resultado aún sin confirmar. No se registró otra autorización.',
         'published': 'Publicado correctamente. No se registró otra autorización.',
-        'blocked': 'Solicitud vencida. No se realizó ningún despliegue.',
+        'blocked': 'Solicitud cerrada. No autoriza una publicación nueva.',
         'uncertain': 'Publicación sin confirmar. Requiere revisión; no se repetirá automáticamente.',
     }[row['state']]
 

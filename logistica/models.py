@@ -1180,6 +1180,12 @@ class BitacoraSalidaLlegada(models.Model):
         return super().save(*args, **kwargs)
 
 
+class CargaCombustibleQuerySet(models.QuerySet):
+    def con_fecha_consumo(self):
+        from django.db.models.functions import Coalesce
+        return self.annotate(_fecha_consumo=Coalesce('fecha_carga', 'fecha_registro'))
+
+
 class CargaCombustibleUnidad(models.Model):
     AUDITORIA_PENDIENTE = "pendiente"
     AUDITORIA_OK = "ok"
@@ -1198,14 +1204,21 @@ class CargaCombustibleUnidad(models.Model):
         BitacoraSalidaLlegada,
         on_delete=models.PROTECT,
         related_name="cargas_combustible",
+        null=True,
+        blank=True,
     )
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="cargas_combustible")
     repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, related_name="cargas_combustible")
-    litros = models.DecimalField(max_digits=7, decimal_places=2)
+    litros = models.DecimalField(max_digits=8, decimal_places=3)
     importe_total = models.DecimalField(max_digits=10, decimal_places=2)
     nivel_gas_despues = models.CharField(max_length=10, choices=BitacoraSalidaLlegada.NIVEL_GAS, blank=True)
     foto_ticket = models.ImageField(upload_to="bitacora/combustible/")
     fecha_registro = models.DateTimeField(auto_now_add=True)
+    fecha_carga = models.DateTimeField(null=True, blank=True, verbose_name="Fecha y hora del ticket")
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="combustible_registrado")
+    estacion = models.CharField(max_length=160, blank=True, default="")
+    folio_ticket = models.CharField(max_length=80, blank=True, default="")
+    observaciones = models.TextField(blank=True, default="")
     ip_registro = models.GenericIPAddressField(null=True)
     latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -1216,10 +1229,17 @@ class CargaCombustibleUnidad(models.Model):
     auditoria_detalle = models.JSONField(default=dict, blank=True)
     auditoria_analizada_en = models.DateTimeField(null=True, blank=True)
 
+    objects = CargaCombustibleQuerySet.as_manager()
+
     class Meta:
         ordering = ["-fecha_registro"]
         verbose_name = "Carga de combustible"
         verbose_name_plural = "Cargas de combustible"
+        constraints = [models.UniqueConstraint(fields=['estacion', 'folio_ticket'], condition=~Q(estacion='') & ~Q(folio_ticket=''), name='combustible_estacion_folio_unico', violation_error_code='duplicate_ticket', violation_error_message='Este folio ya está registrado en esa estación.')]
+
+    @property
+    def fecha_consumo(self):
+        return self.fecha_carga or self.fecha_registro
 
     def __str__(self) -> str:
         return f"{self.unidad.codigo} · {self.litros} L · ${self.importe_total}"

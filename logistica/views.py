@@ -3815,12 +3815,24 @@ def bitacoras_lista(request):
 
     combustible_total_bitacora = qs.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0")
     combustible_total_cargas = CargaCombustibleUnidad.objects.filter(bitacora_id__in=qs.values("id")).aggregate(total=Sum("importe_total")).get("total") or Decimal("0")
-    combustible_total = combustible_total_bitacora + combustible_total_cargas
+    sin_turno = CargaCombustibleUnidad.objects.con_fecha_consumo().filter(bitacora__isnull=True).select_related('unidad', 'repartidor__user')
+    if unidad_id:
+        sin_turno = sin_turno.filter(unidad_id=unidad_id)
+    if repartidor_id:
+        sin_turno = sin_turno.filter(repartidor_id=repartidor_id)
+    if fecha_desde:
+        sin_turno = sin_turno.filter(_fecha_consumo__date__gte=fecha_desde)
+    if fecha_hasta:
+        sin_turno = sin_turno.filter(_fecha_consumo__date__lte=fecha_hasta)
+    # Un filtro de estado de turno no incluye tickets sin turno.
+    if cerrada in ('0', '1'):
+        sin_turno = sin_turno.none()
+    combustible_total = combustible_total_bitacora + combustible_total_cargas + (sin_turno.aggregate(total=Sum('importe_total'))['total'] or Decimal('0'))
     cargas_combustible_bitacora = qs.filter(
         Q(litros_cargados__isnull=False) | Q(costo_combustible__isnull=False) | Q(foto_ticket_combustible__isnull=False)
     ).count()
     cargas_combustible_ruta = CargaCombustibleUnidad.objects.filter(bitacora_id__in=qs.values("id")).count()
-    cargas_combustible = cargas_combustible_bitacora + cargas_combustible_ruta
+    cargas_combustible = cargas_combustible_bitacora + cargas_combustible_ruta + sin_turno.count()
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
     bitacoras = [_decorate_bitacora(bitacora) for bitacora in page]
     return render(
@@ -3833,6 +3845,7 @@ def bitacoras_lista(request):
             "bitacoras_page": page,
             "combustible_total": combustible_total,
             "cargas_combustible": cargas_combustible,
+            "cargas_sin_turno": Paginator(sin_turno.order_by('-_fecha_consumo', '-pk'), 20).get_page(request.GET.get('cargas_page')),
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
             "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user").order_by("user__first_name", "user__username"),
             "filters": {

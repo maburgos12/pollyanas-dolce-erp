@@ -93,6 +93,15 @@ un despliegue antiguo ni permite volver a ejecutarlo. Una fila `executing` nunca
 se exime con este mecanismo. Cada ciclo valida que el certificado siga vinculado
 al historial intacto y a una publicación aprobada que sea ancestro del runtime.
 
+Si una aprobación sigue `approved` pero su revisión ya cambió antes de entrar a
+`publish`, el operador puede usar `supersede_before_publish`. Exige el hash de
+bytes de la fila, recibo auditado de aborto sin efectos y transporte terminado,
+sucesor del mismo PR y runtime actual. Bajo candados de despliegue/publicador y
+CAS del ledger, registra intención durable y cambia únicamente `state` a
+`blocked`; conserva decisión, identidad y fechas. No adelantar expiración ni
+simular rechazo. Una nueva revisión necesita su propio CI y botón. Esta operación
+no se ejecuta automáticamente ni reanuda intentos interrumpidos.
+
 Pruebas afectadas: `test_release_*.py`, `test_telegram*.py` y
 `scripts/test_deploy_web_safe.sh`; integración aislada con PostgreSQL16,
 Redis/Celery reales, restauración nativa y descriptor de flock heredado. Registrar

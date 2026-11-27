@@ -124,7 +124,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn("place-items: center;", css)
         self.assertIn("border-bottom: 2px solid rgba(201, 168, 76", css)
         self.assertIn("--mobile-bar-bg: var(--vino)", css)
-        self.assertIn('name="apple-mobile-web-app-status-bar-style" content="black-translucent"', html)
+        self.assertNotIn('name="apple-mobile-web-app-status-bar-style"', html)
         self.assertIn("body.mobile-nav-open .sidebar", css)
         self.assertIn(".mobile-nav-backdrop:not([hidden])", css)
         self.assertIn("@media (max-width: 720px)", css)
@@ -182,8 +182,11 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"sizes": "512x512"', manifest)
         shell_version = re.search(r'const CACHE_NAME = "pollyanas-erp-shell-([^\"]+)";', sw).group(1)
         for template in ("templates/base.html", "core/templates/core/login.html"):
+            html = (Path(settings.BASE_DIR) / template).read_text()
+            self.assertIn('name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"', html)
+            self.assertNotIn('name="apple-mobile-web-app-status-bar-style"', html)
             self.assertIn(f"navigator.serviceWorker.register('/erp-sw.js?v={shell_version}')",
-                          (Path(settings.BASE_DIR) / template).read_text())
+                          html)
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 

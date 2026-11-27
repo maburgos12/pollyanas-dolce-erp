@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Registrar combustible · Logística{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'logistica/combustible.css' %}?v=20261127-1">{% endblock %}
+{% block content %}
+<div class="pd-page-gutters combustible-editor">
+  <a href="{% url 'logistica:bitacoras_lista' %}#cargas-sin-turno">← Volver a Bitácoras</a>
+  <h1>Registrar carga sin turno</h1>
+  <p>Captura los datos de la nota y selecciona quién realizó la carga. La fecha del ticket determina el mes del gasto.</p>
+  {% include 'logistica/_combustible_captura.html' %}
+</div>
+{% endblock %}

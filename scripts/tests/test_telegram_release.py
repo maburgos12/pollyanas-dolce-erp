@@ -202,7 +202,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_authenticated_duplicate_reports_current_state_even_after_expiry(self):
         for state, expected in [('approved', 'vencida'), ('executing', 'en curso'),
-                                ('published', 'Publicado correctamente'), ('blocked', 'vencida'),
+                                ('published', 'Publicado correctamente'), ('blocked', 'Solicitud cerrada'),
                                 ('uncertain', 'sin confirmar')]:
             with self.subTest(state=state):
                 row = dict(self.row, state=state, decision='approved', decision_at=1,

@@ -3,7 +3,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Login - Pollyanas Dolce ERP</title>
     <link rel="icon" href="{% static 'favicon.ico' %}?v=20260525-logo-v1" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="{% static 'favicon-32x32.png' %}?v=20260525-logo-v1">
@@ -15,7 +15,6 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Pollyana ERP">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'css/styles.css' %}?v=20261127-duo-v4">
     <link rel="stylesheet" href="{% static 'css/pollyana_ops_ui.css' %}?v=20260614-ui-fase-final-v1">
@@ -60,7 +59,7 @@
     <script>
     // ponytail: installability only; no offline login/data cache.
     if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261127-duo-v23').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261127-pwa-v24').catch(function () {});
     }
     </script>
 </body>

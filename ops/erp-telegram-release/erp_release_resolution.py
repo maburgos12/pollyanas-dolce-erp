@@ -1,11 +1,14 @@
-"""Explicit, read-only reconciliation of historical uncertain publications.
+"""Explicit operator resolution; no historical publication is replayed.
 
 The caller MUST hold the existing publisher-worker and deployment locks and run
-as their owning operator. Only resolve_legacy writes a new exclusive certificate;
-worker code may call resolved to check one, never to create one. Original ledger
-rows, decisions and notifications are never changed. A current canonical
+as their owning operator for resolve_legacy, which only writes a certificate;
+worker code may call resolved to check one, never to create one. Uncertain rows
+are not changed. A current canonical
 published row must additionally have a fresh verified runtime receipt when the
-operator creates a certificate; a Git-only claim is insufficient. No old attempt is replayed, merged, revoked or marked published here.
+operator creates a certificate; a Git-only claim is insufficient.
+supersede_before_publish instead acquires these locks itself and may change only
+an approved row's state to blocked after exact no-effects evidence and a durable
+journal. Its decision, bindings and notification history are preserved.
 """
 from contextlib import contextmanager
 import hashlib
@@ -223,3 +226,136 @@ elapsed time, merge metadata alone or filesystem HEAD.
         return True
     except (ValueError, TypeError, KeyError, OSError, RuntimeError):
         return False
+
+
+def _private_bytes(path):
+    """Bounded private evidence read, refusing symlinks in every component."""
+    path = Path(path)
+    require(path.is_absolute() and '..' not in path.parts, 'evidence_path')
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory = os.open('/', flags)
+    try:
+        for part in path.parts[1:-1]:
+            following = os.open(part, flags, dir_fd=directory)
+            os.close(directory)
+            directory = following
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        with os.fdopen(fd, 'rb') as stream:
+            private(os.fstat(stream.fileno()))
+            raw = stream.read(LIMIT + 1)
+            require(len(raw) <= LIMIT, 'evidence_size')
+            return raw
+    finally:
+        os.close(directory)
+
+
+def supersede_before_publish(nonce, new_head, new_base, api, ledger, *,
+                             expected_row_sha256, abort_receipt, abort_sha256, journal,
+                             service_inactive, runtime_verify, production=canonical.production_sha,
+                             deploy_lock=Path('/run/lock/erp-deploy.lock')):
+    """Explicit operator-only invalidation; no merge, deploy, decision or replay.
+
+    expected_row_sha256 binds RAW ledger bytes, not canonicalized JSON. The Root
+    receipt must bind the audited source and reaped transport before publish.
+    service_inactive returns service/timer/main_pid evidence. A fresh exclusive
+    Journal records intent before the sole state change and completion after it.
+    Any interrupted attempt is for operator review, never automatically resumed.
+    """
+    from erp_release_supervisor import Journal
+    from erp_release_worker import lease, leases_intact
+
+    def digest(raw):
+        return hashlib.sha256(raw).hexdigest()
+
+    def sha256(value):
+        return isinstance(value, str) and len(value) == 64 and set(value) <= set('0123456789abcdef')
+
+    require(isinstance(nonce, str) and canonical.NONCE.fullmatch(nonce), 'supersession_nonce')
+    require(all(isinstance(v, str) and canonical.SHA.fullmatch(v) for v in (new_head, new_base)),
+            'supersession_revision')
+    require(sha256(expected_row_sha256) and sha256(abort_sha256), 'supersession_digest')
+    deploy_lock = Path(deploy_lock)
+    worker_path = ledger.directory / '.worker.lock'
+    with lease(deploy_lock) as deploy_fd, lease(worker_path) as worker_fd:
+        held = [(deploy_lock, deploy_fd), (worker_path, worker_fd)]
+        audit = Journal(journal)  # Existing path always refuses replay.
+        stage = 'precheck'
+        try:
+            with ledger.lock():
+                before = ledger.read(nonce)
+                before_raw = _private_bytes(ledger.path(nonce))
+                require(strict_json(before_raw) == before and digest(before_raw) == expected_row_sha256,
+                        'supersession_row_changed')
+            require(before['state'] == 'approved' and before['decision'] == 'approved'
+                    and before['release_sha'] is None, 'only_unexecuted_approval_can_be_superseded')
+            require(new_head != before['head_sha'], 'supersession_requires_new_head')
+            raw = _private_bytes(abort_receipt)
+            require(digest(raw) == abort_sha256, 'supersession_abort_digest')
+            aborted = strict_json(raw)
+            require(isinstance(aborted, dict) and type(aborted.get('schema')) is int
+                    and aborted['schema'] == 1, 'supersession_abort_schema')
+            require(all(aborted.get(k) == before[k] for k in
+                        ('nonce', 'pr', 'head_sha', 'base_sha', 'production_sha'))
+                    and aborted.get('row_sha256') == expected_row_sha256, 'supersession_abort_binding')
+            effects = aborted.get('effects')
+            evidence = aborted.get('evidence_sha256')
+            require(aborted.get('phase') == 'before_publish' and aborted.get('publish_entered') is False
+                    and aborted.get('reaped') is True and isinstance(effects, dict)
+                    and set(effects) == {'ledger', 'merge', 'stop', 'official'}
+                    and all(v is False for v in effects.values()), 'supersession_noeffects_unproved')
+            require(sha256(aborted.get('operator_sha256')) and isinstance(evidence, dict)
+                    and {'source', 'reap'} <= set(evidence) and all(sha256(v) for v in evidence.values())
+                    and type(aborted.get('epoch')) is int
+                    and before['decision_at'] <= aborted['epoch'] <= int(time.time()),
+                    'supersession_abort_provenance')
+
+            def check_services():
+                proof = service_inactive()
+                require(isinstance(proof, dict) and proof.get('service') in {'inactive', 'failed'}
+                        and proof.get('timer') == 'inactive' and type(proof.get('main_pid')) is int
+                        and proof['main_pid'] == 0, 'supersession_publisher_not_quiescent')
+                return strict_json(encoded(proof))
+
+            def check_successor():
+                require(production() == new_base
+                        and api('GET', canonical.PREFIX + '/git/ref/heads/main')['object']['sha'] == new_base,
+                        'supersession_live_base_changed')
+                pr = api('GET', canonical.PREFIX + '/pulls/' + str(before['pr']))
+                require(pr['number'] == before['pr'] and pr['state'] == 'open' and pr['merged'] is False
+                        and pr['head']['sha'] == new_head and pr['base']['sha'] == new_base
+                        and pr['head']['repo']['full_name'] == canonical.REPO
+                        and pr['base']['repo']['full_name'] == canonical.REPO,
+                        'supersession_successor_changed')
+
+            services_before = check_services()
+            check_successor()
+            runtime = runtime_verify(new_base)
+            require(isinstance(runtime, dict) and runtime.get('verified') is True
+                    and runtime.get('release') == new_base, 'supersession_runtime_unverified')
+            runtime = strict_json(encoded(runtime))
+            after = dict(before, state='blocked')
+            canonical.validate(after)
+            with ledger.lock():
+                check_successor()
+                services_after = check_services()
+                require(leases_intact(held), 'supersession_lease_changed')
+                require(digest(_private_bytes(abort_receipt)) == abort_sha256, 'supersession_abort_changed')
+                require(digest(_private_bytes(ledger.path(nonce))) == expected_row_sha256,
+                        'supersession_row_changed')
+                audit.append('SUPERSEDE_INTENT', before=before, after=after,
+                             before_raw_sha256=expected_row_sha256, abort_receipt=aborted,
+                             abort_raw_sha256=abort_sha256, new_head=new_head, new_base=new_base,
+                             runtime_receipt=runtime, runtime_receipt_sha256=digest(encoded(runtime)),
+                             services_before=services_before, services_after=services_after)
+                stage = 'state_write'
+                require(digest(_private_bytes(ledger.path(nonce))) == expected_row_sha256,
+                        'supersession_row_changed')
+                ledger.write(after)  # The only operational mutation: decision/history stay intact.
+                require(ledger.read(nonce) == after, 'supersession_write_unconfirmed')
+                audit.append('SUPERSEDED', nonce=nonce, after_raw_sha256=digest(_private_bytes(ledger.path(nonce))))
+            return after
+        except BaseException:
+            audit.append('HOLD', stage=stage, code='supersession_requires_operator_review')
+            raise
+        finally:
+            audit.close()
