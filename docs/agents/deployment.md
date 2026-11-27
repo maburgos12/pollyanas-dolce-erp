@@ -57,3 +57,41 @@ verificar `migrate --check`; para cambios de modelos inspeccionar también
 No reset/drop de bases, cambiar `.env`, puertos Compose, datos protegidos ni
 configuración operativa sin autorización explícita. La limpieza obligatoria de
 Docker es local; nunca autoriza retirar servicios/volúmenes de este VPS.
+
+## Cambios autorizados de `.env`: conservar identidad antes del reemplazo
+
+Incidente 26-nov-2026, 21:04:38–21:05:09 UTC: una actualización de avisos de
+clima creó un temporal como root, copió el modo 600 y ejecutó `os.replace`, pero
+omitió UID/GID. Web y notificaciones (UID 1000) perdieron acceso hasta restaurar
+el propietario por referencia al respaldo. No fue un fallo de Django ni se
+corrige abriendo lectura a grupo/otros. La evidencia privada del incidente está
+en la tarea `doctor-env-permission-20261127`; nunca adjuntar valores del archivo.
+
+Para futuras actualizaciones autorizadas usar `scripts/replace_private_env.py`,
+no escritores ad hoc `write_text`, `mkstemp` + `replace`, `sed -i` o copias que
+pierdan metadatos. Antes, comprobar UID/GID efectivos del consumidor y modo 600,
+conservar un respaldo privado verificado y preparar el contenido completo fuera
+del repositorio. El helper recibe contenido por stdin y el SHA256 de la versión
+que se revisó, mantiene propietario y modo ANTES del rename, rechaza enlaces y
+metadatos extendidos no cubiertos, sincroniza archivo/directorio y toma el mismo
+`/run/lock/erp-deploy.lock` que el despliegue. No cambia servicios ni corrige
+silenciosamente un propietario o permisos que ya sean incorrectos.
+
+Invocación desde una sesión autorizada, con rutas/identidades verificadas:
+
+```bash
+python3 scripts/replace_private_env.py --file "$ENV_FILE" \
+  --expected-sha256 "$EXPECTED_ENV_SHA256" --app-uid "$APP_UID" \
+  --app-gid "$APP_GID" < "$PRIVATE_REPLACEMENT"
+```
+
+No incluir valores en argumentos, logs o historial. No reutilizar un SHA de otra
+versión. Todos los escritores deben respetar el bloqueo; no protege contra una
+escritura externa que lo ignore. Si ocurre un fallo después del rename, comprobar
+metadatos y hash antes de reintentar: una salida fallida no prueba que no cambió.
+Antes de cualquier restart/deploy comprobar lectura con la identidad real del
+consumidor (`test -r /app/.env`, sin imprimirlo); ante fallo detenerse antes de
+checkout/reinicio y diagnosticar. Con consumidores detenidos por warm, realizar
+esta comprobación en el preflight anterior al warm y conservar su recibo.
+Después verificar consumidores, metadatos y ausencia de nuevos PermissionError.
+No ocultar la excepción del cargador, ni aplicar chmod/chown recursivo.
