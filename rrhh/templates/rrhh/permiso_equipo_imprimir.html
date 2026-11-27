@@ -1,0 +1,43 @@
+{% load static tz %}<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ permiso.folio }} · Solicitud de permiso</title>
+  <link rel="stylesheet" href="{% static 'css/template_modules/rrhh-templates-rrhh-prestamo-imprimir.css' %}">
+  <link rel="stylesheet" href="{% static 'css/permiso-equipo-imprimir.css' %}?v=20261127">
+  <script src="{% static 'js/permiso-equipo-imprimir.js' %}?v=20261127" defer></script>
+</head>
+<body>
+  <nav class="actions" aria-label="Acciones del formato">
+    <a class="btn secondary" href="{% url 'rrhh:mi_equipo' %}">Volver a Mi equipo</a>
+    <button class="btn" type="button" id="permiso-imprimir">Imprimir / PDF</button>
+  </nav>
+  <main class="page">
+    <header class="header">
+      <div><div class="brand">Pollyana's Dolce</div><h1>Solicitud de permiso</h1><p>Capital Humano · Control de permisos</p></div>
+      <div class="folio">Folio<br>{{ permiso.folio }}</div>
+    </header>
+    {% timezone "America/Mazatlan" %}
+    <section class="grid" aria-label="Datos del permiso">
+      <div class="field full"><span class="label">Empleado</span><div class="value">{{ permiso.empleado.nombre }}</div></div>
+      <div class="field"><span class="label">Área / sucursal</span><div class="value">{{ permiso.empleado.area|default:"—" }} · {{ permiso.empleado.sucursal_display|default:"—" }}</div></div>
+      <div class="field"><span class="label">Puesto</span><div class="value">{{ permiso.empleado.puesto|default:"—" }}</div></div>
+      <div class="field"><span class="label">Tipo</span><div class="value">{{ permiso.get_tipo_display }}</div></div>
+      <div class="field"><span class="label">Goce de sueldo</span><div class="value">{% if permiso.goce_sueldo %}Con goce de sueldo{% else %}Sin goce de sueldo{% endif %}</div></div>
+      <div class="field"><span class="label">Fecha inicial</span><div class="value">{{ permiso.fecha_inicio|date:"d/m/Y" }}</div></div>
+      <div class="field"><span class="label">Fecha final</span><div class="value">{% if permiso.fecha_fin %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% endif %}</div></div>
+      <div class="field"><span class="label">Horario (Mazatlán)</span><div class="value">{% if permiso.tipo == 'permiso_dia' %}Día completo{% else %}{{ permiso.fecha_inicio|date:"H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"H:i" }}{% endif %}{% endif %}</div></div>
+      <div class="field"><span class="label">Estado del permiso</span><div class="value">{{ permiso.get_estado_display }}</div></div>
+      {% if permiso.fechas_laborables %}<div class="field full"><span class="label">Días laborables incluidos ({{ permiso.fechas_laborables|length }})</span><div class="value">{{ permiso.fechas_laborables|join:", " }}</div></div>{% endif %}
+      <div class="field full"><span class="label">Motivo</span><div class="value reason">{{ permiso.motivo }}</div></div>
+    </section>
+    {% endtimezone %}
+    <p class="legal">La impresión conserva el estado registrado del permiso y no sustituye su autorización en el ERP.</p>
+    <section class="signatures" aria-label="Firmas">
+      <div class="signature"><strong>Firma del empleado</strong>{{ permiso.empleado.nombre }}</div>
+      <div class="signature"><strong>Firma jefe directo</strong>{{ permiso.empleado.jefe_directo.nombre }}</div>
+    </section>
+  </main>
+</body>
+</html>

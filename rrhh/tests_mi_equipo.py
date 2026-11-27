@@ -112,3 +112,41 @@ class MiEquipoTests(TestCase):
         session.force_login(self.user)
         self.assertEqual(session.post(self.permisos, self.permiso(), format="json").status_code, 403)
         self.assertIn(APIClient().get(self.permisos).status_code, (401, 403))
+
+    def test_impresion_permiso_equipo_datos_estado_y_sin_mutaciones(self):
+        permiso = PermisoSalida.objects.create(
+            empleado=self.emp, tipo="permiso_hora",
+            fecha_inicio=timezone.datetime(2026, 11, 30, 17, tzinfo=timezone.get_fixed_timezone(0)),
+            fecha_fin=timezone.datetime(2026, 11, 30, 18, tzinfo=timezone.get_fixed_timezone(0)),
+            motivo='<script>alert("prueba")</script>', goce_sueldo=False,
+            fechas_laborables=["2026-11-30", "2026-12-01"],
+        )
+        self.client.force_login(self.user)
+        url = f"/rrhh/mi-equipo/permisos/{permiso.pk}/imprimir/"
+        antes = PermisoSalida.objects.values().get(pk=permiso.pk)
+        for estado, etiqueta in PermisoSalida.ESTADO_CHOICES:
+            PermisoSalida.objects.filter(pk=permiso.pk).update(estado=estado)
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            for contenido in (permiso.folio, self.emp.nombre, etiqueta, "Sin goce de sueldo", "10:00", "11:00", "2026-12-01", "Imprimir / PDF", "Firma del empleado", "Firma jefe directo"):
+                self.assertContains(response, contenido)
+            self.assertNotContains(response, '<script>alert("prueba")</script>')
+            self.assertContains(response, '&lt;script&gt;')
+            self.assertIn("no-store", response.headers["Cache-Control"])
+        PermisoSalida.objects.filter(pk=permiso.pk).update(estado=antes["estado"])
+        self.assertEqual(antes, PermisoSalida.objects.values().get(pk=permiso.pk))
+
+    def test_impresion_revalida_equipo_autenticacion_y_solo_lectura(self):
+        permiso = PermisoSalida.objects.create(empleado=self.emp, tipo="permiso_dia", fecha_inicio=timezone.now(), motivo="Personal")
+        url = f"/rrhh/mi-equipo/permisos/{permiso.pk}/imprimir/"
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get(url), "Día completo")
+        self.assertEqual(self.client.post(url).status_code, 405)
+        for empleado in (self.ajeno, self.jefa, self.inactivo):
+            PermisoSalida.objects.filter(pk=permiso.pk).update(empleado=empleado)
+            self.assertEqual(self.client.get(url).status_code, 404)
+        PermisoSalida.objects.filter(pk=permiso.pk).update(empleado=self.emp)
+        self.emp.jefe_directo = None
+        self.emp.save()
+        self.assertEqual(self.client.get(url).status_code, 404)

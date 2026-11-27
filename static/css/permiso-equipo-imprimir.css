@@ -1,0 +1,18 @@
+@page { size: letter; margin: 15mm; }
+.value, .folio { overflow-wrap: anywhere; }
+.reason { white-space: pre-wrap; }
+.signatures { grid-template-columns: repeat(2, minmax(0, 1fr)); break-inside: avoid; }
+.actions .btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; font: inherit; }
+.actions .btn:focus-visible { outline: 3px solid #8B2252; outline-offset: 3px; }
+@media screen and (max-width: 600px) {
+  body { padding: 12px; }
+  .page { padding: 18px; }
+  .actions { flex-wrap: wrap; }
+  .header, .grid { grid-template-columns: 1fr; }
+  .folio { text-align: left; }
+}
+@media print {
+  .page { padding: 0; }
+  .field { break-inside: avoid; }
+  .reason { font-weight: 400; }
+}
