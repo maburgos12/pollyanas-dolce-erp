@@ -2,7 +2,7 @@ from django.urls import path
 
 from . import views
 from . import views_pwa
-from .views_combustible import combustible_editar
+from .views_combustible import combustible_editar, combustible_nuevo
 
 app_name = "logistica"
 
@@ -38,6 +38,7 @@ urlpatterns = [
     path("reportes/", views.reportes_lista, name="reportes_lista"),
     path("reportes/nuevo/", views.reporte_crear, name="reporte_crear"),
     path("combustible/<int:pk>/editar/", combustible_editar, name="combustible_editar"),
+    path("combustible/nuevo/", combustible_nuevo, name="combustible_nuevo"),
     path("bitacoras/", views.bitacoras_lista, name="bitacoras_lista"),
     path("rutas/<int:pk>/imprimir/", views.ruta_print, name="ruta_print"),
     path("rutas/<int:pk>/", views.ruta_detail, name="ruta_detail"),

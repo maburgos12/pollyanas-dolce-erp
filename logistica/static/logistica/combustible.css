@@ -5,6 +5,10 @@
 .combustible-field { display: grid; gap: 8px; margin-block: 20px; }
 .combustible-field label { font-weight: 700; }
 .combustible-error { color: #9e1f30; }
+.combustible-captura-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 0 24px; }
+.combustible-captura-grid .input-field { min-height: 44px; width: 100%; box-sizing: border-box; }
+.combustible-recibo dt { font-weight: 700; margin-top: 16px; }
+.combustible-recibo dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .combustible-history + .combustible-history { border-top: 1px solid #dacbd1; padding-top: 16px; }
 .combustible-aviso { box-sizing: border-box; width: min(540px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid #dacbd1; border-radius: 16px; padding: 24px; color: #3d2b2b; background: #fffaf5; font-family: Nunito, system-ui, sans-serif; }
 .combustible-aviso::backdrop { background: rgb(35 20 28 / 55%); }

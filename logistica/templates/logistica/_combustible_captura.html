@@ -1,0 +1,34 @@
+{% load humanize %}
+<section id="combustible-captura" class="pd-work-panel combustible-panel" aria-labelledby="captura-title">
+  {% if carga %}
+  <h2 id="captura-title">Carga #{{ carga.pk }} registrada</h2>
+  <dl class="combustible-recibo">
+    <dt>Unidad</dt><dd>{{ carga.unidad.codigo }} · {{ carga.unidad.descripcion }}</dd>
+    <dt>Responsable de la carga</dt><dd>{{ carga.repartidor }}</dd>
+    <dt>Fecha del ticket</dt><dd>{{ carga.fecha_consumo|date:"d/m/Y H:i" }}</dd>
+    <dt>Estación y folio</dt><dd>{{ carga.estacion }} · {{ carga.folio_ticket }}</dd>
+    <dt>Importe total</dt><dd>${{ carga.importe_total|floatformat:2|intcomma }} MXN · {{ carga.litros }} L</dd>
+    <dt>Observaciones</dt><dd>{{ carga.observaciones|default:"Sin observaciones" }}</dd>
+    <dt>Registró</dt><dd>{{ carga.registrado_por.get_full_name|default:carga.registrado_por.username }} · {{ carga.fecha_registro|date:"d/m/Y H:i" }}</dd>
+    <dt>Turno</dt><dd>Sin turno vinculado</dd>
+  </dl>
+  <a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener">Ver foto del ticket</a>
+  <p>Auditoría del ticket: {{ carga.get_auditoria_estado_display }}.</p>
+  <a class="btn btn-secondary" href="{% url 'logistica:combustible_nuevo' %}">Registrar otra carga</a>
+  {% else %}
+  <h2 id="captura-title">Datos de la nota</h2>
+  <form method="post" enctype="multipart/form-data" data-async-action>
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div role="alert" class="combustible-error">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="combustible-captura-grid">
+    {% for field in form %}
+      <div class="combustible-field">
+        {{ field.label_tag }}{{ field }}
+        {% if field.errors %}<div role="alert" class="combustible-error">{{ field.errors }}</div>{% endif %}
+      </div>
+    {% endfor %}
+    </div>
+    <button class="btn btn-primary" type="submit" data-pending-label="Guardando…">Guardar carga</button>
+  </form>
+  {% endif %}
+</section>

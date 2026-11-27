@@ -224,10 +224,17 @@ def conciliar_combustible(periodo: date) -> dict:
             if item['ticket']:
                 por_ticket[(c.rfc_emisor, item['ticket'])].append(item)
 
-    registros = list(CargaCombustibleUnidad.objects.filter(
-        fecha_registro__date__gte=inicio, fecha_registro__date__lt=fin
-    ).select_related('unidad').order_by('fecha_registro', 'id'))
-    lecturas = [(c, c.auditoria_detalle.get('ticket_leido', {})) for c in registros]
+    registros = list(CargaCombustibleUnidad.objects.con_fecha_consumo().filter(
+        _fecha_consumo__date__gte=inicio, _fecha_consumo__date__lt=fin
+    ).select_related('unidad').order_by('_fecha_consumo', 'id'))
+    lecturas = [(c, dict(c.auditoria_detalle.get('ticket_leido', {}))) for c in registros]
+    for c, t in lecturas:
+        if c.folio_ticket:
+            t.setdefault('folio', c.folio_ticket)
+        if c.estacion:
+            t.setdefault('estacion', c.estacion)
+        if c.fecha_carga:
+            t.setdefault('fecha', timezone.localtime(c.fecha_carga).date().isoformat())
     claves = Counter((RFC_ESTACIONES.get(str(t.get('estacion', '')).strip().upper()), str(t.get('folio', '')).strip())
                      for c, t in lecturas if t.get('folio'))
     hashes = Counter(c.ticket_sha256 for c in registros if c.ticket_sha256)
@@ -240,7 +247,7 @@ def conciliar_combustible(periodo: date) -> dict:
         grupo['total'] += c.importe_total
         folio = str(t.get('folio', '')).strip()
         clave = (RFC_ESTACIONES.get(str(t.get('estacion', '')).strip().upper()), folio)
-        item = {'id': c.id, 'unidad': codigo, 'fecha': timezone.localtime(c.fecha_registro).date().isoformat(),
+        item = {'id': c.id, 'unidad': codigo, 'fecha': timezone.localtime(c.fecha_consumo).date().isoformat(),
                 'fecha_ticket': t.get('fecha'), 'ticket': folio, 'importe': c.importe_total,
                 'estado': 'TICKET_SIN_CFDI_LOCALIZADO', 'uuid_cfdi': None, 'factura': None}
         if not (c.foto_ticket and c.auditoria_estado == 'ok' and t.get('es_ticket') is True
@@ -331,7 +338,7 @@ def render_conciliacion_texto(datos: dict) -> str:
     lineas += ['', 'APLICACIONES FISCALES (cada pareja se cuenta una vez):']
     for a in datos.get('aplicaciones', []):
         lineas.append(f"  {a['fecha']} | {a['factura']} / {a['nota'] or 'nota pendiente'} | ${a['total']:,.2f} | {'relaciones verificadas' if a['confirmada'] else 'revisar relaciones/importes'} | anticipos: {', '.join(a['anticipos'])}")
-    lineas += ['', 'BITÁCORA POR UNIDAD (fecha de captura):']
+    lineas += ['', 'COMBUSTIBLE POR UNIDAD (fecha del ticket; captura en registros históricos):']
     for unidad, b in sorted(datos['bitacora'].items()):
         lineas.append(f"  {unidad} | {b['cargas']} cargas | ${b['total']:,.2f}")
     lineas += [f"Total registrado: ${datos['total_bitacora']:,.2f}",

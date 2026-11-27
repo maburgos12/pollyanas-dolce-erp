@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% load static humanize %}
-{% block title %}Corregir combustible · {{ carga.bitacora.folio }}{% endblock %}
+{% block title %}Corregir combustible · #{{ carga.pk }}{% endblock %}
 {% block extra_css %}<link rel="stylesheet" href="{% static 'logistica/combustible.css' %}?v=20261104-1">{% endblock %}
 {% block content %}
 <div class="pd-page-gutters combustible-editor">
   <a href="{% url 'logistica:bitacoras_lista' %}">← Volver a Bitácoras</a>
   <h1>Corregir registro de combustible</h1>
-  <p>Bitácora <strong>{{ carga.bitacora.folio }}</strong> · {{ carga.unidad.codigo }} · {{ carga.fecha_registro|date:"d/m/Y H:i" }}</p>
-  <p>Capturado por <strong>{{ carga.repartidor }}</strong>. Revisa la foto antes de cambiar los datos.</p>
+  <p>{% if carga.bitacora_id %}Bitácora <strong>{{ carga.bitacora.folio }}</strong>{% else %}Carga sin turno #{{ carga.pk }}{% endif %} · {{ carga.unidad.codigo }} · {{ carga.fecha_consumo|date:"d/m/Y H:i" }}</p>
+  <p>Responsable: <strong>{{ carga.repartidor }}</strong>. Revisa la foto antes de cambiar los datos.</p>
   <div class="combustible-editor-grid">
     <section class="pd-work-panel combustible-panel" aria-labelledby="ticket-title">
       <h2 id="ticket-title">Ticket original</h2>

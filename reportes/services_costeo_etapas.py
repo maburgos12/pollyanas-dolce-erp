@@ -39,6 +39,9 @@ def leer_logistica(inicio, fin, mo):
         'id', 'folio', 'unidad_id', 'unidad__codigo', 'repartidor_id', 'cerrada', 'km_salida', 'km_llegada'))
     combustible = list(CargaCombustibleUnidad.objects.filter(bitacora__fecha__range=(inicio, fin))
         .values('unidad_id').annotate(monto=Sum('importe_total')))
+    sin_turno = list(CargaCombustibleUnidad.objects.con_fecha_consumo().filter(
+        bitacora__isnull=True, _fecha_consumo__date__range=(inicio, fin))
+        .values('unidad_id', 'unidad__codigo').annotate(monto=Sum('importe_total')))
     ids = {r['repartidor_id'] for r in rutas} | {r['acompanante_id'] for r in rutas} | {t['repartidor_id'] for t in turnos}
     usuarios = dict(Repartidor.objects.filter(id__in=ids).values_list('id', 'user_id'))
     produccion_ids = {p['id'] for p in mo['personas']}
@@ -76,8 +79,8 @@ def leer_logistica(inicio, fin, mo):
     conocidos = [g for g in gastos if g['monto_real'] is not None and g['monto_real'] >= 0
                  and g['fuente_real'] in permitidas and not (g['metadata'] or {}).get('sin_datos_fuente')]
     combustible_real = sum((g['monto_real'] for g in conocidos if g['fuente_real'] == 'AUTO:COMBUSTIBLE_UNIDAD'), ZERO)
-    combustible_cargas = sum((c['monto'] for c in combustible), ZERO)
-    combustible_conciliado = bool(combustible) and combustible_real == combustible_cargas
+    combustible_cargas = sum((c['monto'] for c in combustible + sin_turno), ZERO)
+    combustible_conciliado = bool(combustible or sin_turno) and combustible_real == combustible_cargas
     unidades = {}
     for t in turnos:
         u = unidades.setdefault(t['unidad_id'], {'id': t['unidad_id'], 'codigo': t['unidad__codigo'],
@@ -91,6 +94,11 @@ def leer_logistica(inicio, fin, mo):
     for c in combustible:
         if c['unidad_id'] in unidades:
             unidades[c['unidad_id']]['combustible'] = c['monto']
+    for c in sin_turno:
+        u = unidades.setdefault(c['unidad_id'], {'id': c['unidad_id'], 'codigo': c['unidad__codigo'],
+            'km': ZERO, 'pendientes': [], 'combustible': None, 'asignado': ZERO})
+        u['sin_turno'] = c['monto']
+        u['combustible'] = (u['combustible'] or ZERO) + c['monto']
     por_turno = defaultdict(list)
     for r in rutas:
         por_turno[r['bitacora_salida_id']].append(r)
@@ -126,7 +134,8 @@ def leer_logistica(inicio, fin, mo):
                     r = vinculadas[0]
                     if r['unidad_operativa_id'] == u['id'] and not r['pendiente'] and t['km'] is not None:
                         bases[r['id']] = t['km']
-            importes, _ = asignar_parcial(u['combustible'], bases, u['km'])
+            # Una nota sin turno no demuestra consumo de ninguna ruta.
+            importes, _ = asignar_parcial(u['combustible'] - u.get('sin_turno', ZERO), bases, u['km'])
             for r in rutas:
                 if r['id'] in importes:
                     r['combustible'] = importes[r['id']]
