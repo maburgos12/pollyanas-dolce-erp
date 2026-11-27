@@ -25,11 +25,12 @@
     <link rel="stylesheet"{% if dashboard_loading %} media="print" onload="this.media='all'"{% endif %} href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
     <link rel="stylesheet"{% if dashboard_loading %} media="print" onload="this.media='all'"{% endif %} href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <script {% if dashboard_loading %}async{% else %}defer{% endif %} src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260926-production-table-v3">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20261127-duo-v4">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
     <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20261120-reportes-nav-v20">
+    <link rel="stylesheet" href="{% static 'css/erp_adaptive.css' %}?v=20261127-duo-v1">
 </head>
 <body class="{% block body_class %}{% endblock %}{% if ui_preview.active %} preview-read-only{% endif %}">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -1064,6 +1065,7 @@
     {% endif %}
 
     // ── Navegación móvil touch ────────────────────────────────────
+    var mobileNavigationMedia = window.matchMedia('(max-width: 720px), (max-width: 1100px) and (pointer: coarse)');
     (function () {
         var toggle = document.querySelector('.mobile-nav-toggle');
         var backdrop = document.querySelector('.mobile-nav-backdrop');
@@ -1093,7 +1095,10 @@
         });
 
         window.addEventListener('resize', function () {
-            if (window.innerWidth > 720) setOpen(false);
+            if (!mobileNavigationMedia.matches) setOpen(false);
+        });
+        mobileNavigationMedia.addEventListener('change', function () {
+            if (!mobileNavigationMedia.matches) setOpen(false);
         });
     })();
 
@@ -1188,7 +1193,7 @@
 
         buttons.forEach(function (btn) {
             btn.addEventListener('click', function () {
-                var isMobileSidebar = window.innerWidth <= 720;
+                var isMobileSidebar = mobileNavigationMedia.matches;
                 if (btn.dataset.dashboardUrl && !isMobileSidebar) {
                     window.location.href = btn.dataset.dashboardUrl;
                     return;
@@ -1240,7 +1245,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261121-sat-efirma-v22').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261127-duo-v23').catch(function () {});
         }
     })();
     </script>

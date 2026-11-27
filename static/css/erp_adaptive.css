@@ -1,0 +1,112 @@
+/* Shared ERP window layout. Safari owns the reserved system-controls region:
+ * use the available viewport, not device dimensions or experimental fold APIs.
+ * Keep in sync with mobileNavigationMedia in base.html and styles.css.
+ */
+:root {
+  --erp-safe-top: env(safe-area-inset-top, 0px);
+  --erp-safe-right: env(safe-area-inset-right, 0px);
+  --erp-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --erp-safe-left: env(safe-area-inset-left, 0px);
+}
+
+.layout-wrapper,
+.main-content {
+  min-height: 100svh;
+}
+
+.main-content[data-hallmark-scope="erp"] {
+  padding-top: max(var(--erp-frame-gutter-y), var(--erp-safe-top));
+  padding-right: max(var(--erp-frame-gutter-x), var(--erp-safe-right));
+  padding-bottom: max(44px, var(--erp-safe-bottom));
+  padding-left: max(var(--erp-frame-gutter-x), var(--erp-safe-left));
+}
+
+.sidebar {
+  padding: var(--erp-safe-top) 0 var(--erp-safe-bottom) var(--erp-safe-left);
+}
+
+.sidebar > nav {
+  min-height: 0;
+}
+
+.mobile-app-bar {
+  min-height: calc(56px + var(--erp-safe-top));
+  padding: var(--erp-safe-top) max(12px, var(--erp-safe-right)) 0 max(12px, var(--erp-safe-left));
+}
+
+.main-content :is(.table-responsive, .erp-group-tabs, .bi-filterbar, .bi-control) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.main-content :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.erp-toast-region {
+  right: max(16px, var(--erp-safe-right));
+  bottom: max(16px, var(--erp-safe-bottom));
+  max-width: calc(100% - max(16px, var(--erp-safe-left)) - max(16px, var(--erp-safe-right)));
+}
+
+.erp-confirm__panel,
+.preview-picker {
+  max-height: calc(100dvh - var(--erp-safe-top) - var(--erp-safe-bottom) - 32px);
+  max-width: calc(100% - var(--erp-safe-left) - var(--erp-safe-right) - 32px);
+  overflow-y: auto;
+}
+
+.login-container {
+  min-height: 100svh;
+  padding: max(20px, var(--erp-safe-top)) max(20px, var(--erp-safe-right)) max(20px, var(--erp-safe-bottom)) max(20px, var(--erp-safe-left));
+}
+
+.login-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 720px), (max-width: 1100px) and (pointer: coarse) {
+  :root {
+    --erp-control-min-height: 44px;
+  }
+
+  html {
+    scroll-padding-top: calc(68px + var(--erp-safe-top));
+  }
+
+  .main-content[data-hallmark-scope="erp"] {
+    padding: calc(68px + var(--erp-safe-top)) max(12px, var(--erp-safe-right)) max(20px, var(--erp-safe-bottom)) max(12px, var(--erp-safe-left)) !important;
+  }
+
+  .sidebar,
+  .sidebar:hover,
+  .sidebar:focus-within {
+    width: min(calc(286px + var(--erp-safe-left)), calc(100% - 28px - var(--erp-safe-right)));
+    max-width: calc(100% - 28px - var(--erp-safe-right));
+  }
+
+  .main-content :is(.btn, .module-tab, button:not(.alert-close)) {
+    min-height: 44px;
+  }
+
+  /* WebKit's native single-line select does not honor min-height consistently. */
+  .main-content select:not([multiple]):not([size]) {
+    height: 44px;
+  }
+
+  .main-content :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea),
+  .login-card :is(input, button) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .bi-filterbar {
+    flex-wrap: wrap;
+  }
+
+  .bi-filterbar .bi-control {
+    flex: 1 1 180px;
+  }
+}
