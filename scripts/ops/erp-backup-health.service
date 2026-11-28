@@ -1,5 +1,5 @@
 [Unit]
-Description=ERP NAS restore verification without cleanup
+Description=ERP NAS restore verification and verified local backup retention
 Wants=network-online.target
 After=network-online.target docker.service
 
