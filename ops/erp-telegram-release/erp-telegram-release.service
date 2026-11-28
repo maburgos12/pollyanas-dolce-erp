@@ -11,12 +11,15 @@ LoadCredential=telegram.json:/etc/erp-mac-ia-watchdog/telegram.json
 StateDirectory=erp-point-decision
 StateDirectoryMode=0700
 UMask=0077
-TimeoutStartSec=2400
+# A publication deadline escalates to the operator while retaining leases. Never
+# kill a deployment client and release exclusions while its descendants operate.
+TimeoutStartSec=infinity
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
 ReadWritePaths=/opt/pastelerias-erp /run/lock
+ReadWritePaths=/run/pastelerias-mac-ia/worker.lock /var/lib/erp-point-archive/.worker.lock /var/lib/erp-cleanup-prepare/.worker.lock /var/lib/erp-point-decision/cleanups/.worker.lock
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes

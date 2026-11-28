@@ -202,7 +202,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_authenticated_duplicate_reports_current_state_even_after_expiry(self):
         for state, expected in [('approved', 'vencida'), ('executing', 'en curso'),
-                                ('published', 'Publicado correctamente'), ('blocked', 'vencida'),
+                                ('published', 'Publicado correctamente'), ('blocked', 'Solicitud cerrada'),
                                 ('uncertain', 'sin confirmar')]:
             with self.subTest(state=state):
                 row = dict(self.row, state=state, decision='approved', decision_at=1,
@@ -484,6 +484,8 @@ class ReleaseTests(unittest.TestCase):
         consumer.write_bytes(original)
         (source / 'erp_telegram_release.py').write_text('pass\n')
         (source / 'erp_telegram_cleanup.py').write_text('pass\n')
+        for name in module.MODULES[2:]:
+            (source / name).write_text('pass\n')
         for name in ('erp-telegram-release.service', 'erp-telegram-release.timer'):
             (source / name).write_text('[Unit]\nDescription=test\n')
         failed = False
@@ -546,6 +548,8 @@ class ReleaseTests(unittest.TestCase):
         consumer.write_bytes(original)
         (source / 'erp_telegram_release.py').write_text('pass\n')
         (source / 'erp_telegram_cleanup.py').write_text('pass\n')
+        for name in module.MODULES[2:]:
+            (source / name).write_text('pass\n')
         for name in ('erp-telegram-release.service', 'erp-telegram-release.timer'):
             (source / name).write_text('[Unit]\nDescription=test\n')
         with self.assertRaisesRegex(RuntimeError, 'policy_unreadable'):
