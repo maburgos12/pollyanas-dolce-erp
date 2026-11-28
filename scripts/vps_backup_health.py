@@ -40,19 +40,22 @@ def atomic(path, text):
     temp.replace(path)
 
 
-def verify_point(rotator, stem, receipts=None, *, nas_side=False, smb_direct=False):
-    manifest, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
-    directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
-    path = directories[0] / (stem + '.json')
-    proof = None
+def find_receipt(rotator, directories, stem, checksum):
     for directory in directories:
         try:
-            candidate = rotator.read_receipt(directory / path.name, stem)
-            rotator.require(candidate['manifest_sha256'] == checksum, 'Changed manifest')
-            proof = candidate
-            break
+            candidate = rotator.read_receipt(directory / (stem + '.json'), stem)
+            if candidate['manifest_sha256'] == checksum:
+                return directory, candidate
         except (OSError, ValueError, KeyError, TypeError):
             continue
+    return None, None
+
+
+def verify_point(rotator, stem, receipts=None, *, nas_side=False, smb_direct=False):
+    _, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
+    directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
+    path = directories[0] / (stem + '.json')
+    _, proof = find_receipt(rotator, directories, stem, checksum)
     options = {'nas_side': True} if nas_side else {}
     if smb_direct:
         options['smb_direct'] = True
@@ -82,7 +85,26 @@ def verify_point(rotator, stem, receipts=None, *, nas_side=False, smb_direct=Fal
     return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
 
 
-def maintain(rotator, verify_only=False, *, nas_side=False, smb_direct=False):
+def retain_latest_local(rotator, verified, receipts):
+    result = dict(rotation='Retire verified local copies only', retired_local=[])
+    for item in verified[:-1]:
+        stem = item['point']
+        try:
+            directory, _ = find_receipt(rotator, (receipts, rotator.RECEIPTS), stem, item['manifest_sha256'])
+            rotator.require(directory is not None, 'No matching restore proof for retirement')
+            # The rotator revalidates NAS bytes and rechecks the newest point under its lock.
+            rotator.retire_point(rotator.BACKUPS, rotator.EXPORT, directory, rotator.NAS,
+                                 stem, nas_side=True, smb_direct=True)
+        except Exception as error:
+            result['error'] = f'Local retirement stopped at {stem}: {error}'
+            break
+        result['retired_local'].append(stem)
+    return result
+
+
+def maintain(rotator, verify_only=False, *, nas_side=False, smb_direct=False, retire_verified_local=False):
+    rotator.require(not retire_verified_local or (verify_only and nas_side and smb_direct),
+                    'Local retirement requires verify-only and NAS-side Direct SMB')
     rotator.require(not nas_side or verify_only, 'NAS-side verification requires verify-only')
     rotator.require(not smb_direct or nas_side, 'Direct SMB requires NAS-side verification')
     receipts = None
@@ -111,7 +133,10 @@ def maintain(rotator, verify_only=False, *, nas_side=False, smb_direct=False):
             options['smb_direct'] = True
         verified = [verify_point(rotator, point, receipts=receipts, **options) for point in points]
     if verify_only:
-        return dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")
+        result = dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")
+        if retire_verified_local:
+            result.update(retain_latest_local(rotator, verified, receipts))
+        return result
     # The rotator reacquires its lock and checks the current newest set and every proof.
     rotation = run([sys.executable, ROTATOR, '--apply'])
     # A daily backup may complete between our verification and the rotator's lock.
@@ -133,14 +158,18 @@ def maintain(rotator, verify_only=False, *, nas_side=False, smb_direct=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--verify-only', action='store_true', help='Verify recovery without rotation or Docker maintenance')
+    parser.add_argument('--verify-only', action='store_true', help='Verify recovery, without Docker maintenance')
     parser.add_argument('--nas-side', action='store_true', help='Hash on NAS and separately check SMB access')
     parser.add_argument('--smb-direct', action='store_true', help='Use encrypted SMB without the kernel mount')
+    parser.add_argument('--retire-verified-local', action='store_true',
+                        help='After full verification, retire older verified local copies only')
     args = parser.parse_args()
     if args.smb_direct and not args.nas_side:
         parser.error('--smb-direct requires --nas-side')
     if args.nas_side and not args.verify_only:
         parser.error('--nas-side requires --verify-only')
+    if args.retire_verified_local and not (args.verify_only and args.nas_side and args.smb_direct):
+        parser.error('--retire-verified-local requires --verify-only --nas-side --smb-direct')
     os.umask(0o077)
     STATE.mkdir(exist_ok=True)
     report = dict(started_epoch=time.time(), success=False)
@@ -152,8 +181,10 @@ def main():
             options = {'nas_side': True} if args.nas_side else {}
             if args.smb_direct:
                 options['smb_direct'] = True
+            if args.retire_verified_local:
+                options['retire_verified_local'] = True
             report.update(maintain(rotator, verify_only=args.verify_only, **options))
-            report['success'] = True
+            report['success'] = 'error' not in report
         except Exception as error:
             report['error'] = str(error)
         finally:

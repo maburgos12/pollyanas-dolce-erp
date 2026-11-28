@@ -56,15 +56,22 @@ la rotación. Validar recuperación por separado antes de cualquier retiro aprob
 Registrar y restablecer cualquier pausa temporal del timer; no silenciar los
 monitores de disco ni inventarios.
 
-La unidad de recuperación usa `--verify-only`: verifica y registra recuperación,
-sin iniciar rotación ni mantenimiento Docker. Los recibos nuevos se guardan en
+La unidad programada verifica la recuperación con hashes en el NAS y SMB directo
+cifrado, sin depender del montaje del kernel. Requiere el entorno instalado
+`/opt/erp-backup-smb-direct/bin/python3` y la clave restringida del verificador.
+Los recibos nuevos se guardan en
 `/var/lib/erp-backup-restore/verification-receipts`, un directorio privado separado
-de `receipts`, que consume el rotador. Verificar no convierte un respaldo nuevo en
-elegible para retiro. Puede leer recibos canónicos válidos, pero no los modifica;
-siempre comprueba nuevamente el contenido del NAS antes de informar éxito.
-El cron del rotador existente sigue
-usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
-no amplía su autorización ni autoriza otros lotes de limpieza.
+de `receipts`. El verificador puede leer recibos canónicos válidos, pero no los
+modifica. Solo con `--retire-verified-local` y después de verificar todos los puntos
+locales completos, la unidad llama al rotador por cada punto anterior al más
+reciente. El rotador vuelve a cotejar el respaldo en el NAS y protege al último
+bajo candado. Solo retira archivos y enlaces de exportación en el VPS. Si falla
+la verificación, no inicia ningún retiro; si falla un retiro, detiene los
+siguientes y registra el punto y los retiros completados en `health-latest.json`.
+No se retiran respaldos del NAS ni se hace mantenimiento Docker. El cron antiguo
+mantiene su alcance y usa el mismo candado; no se le publican recibos nuevos.
+Para una comprobación sin retiro, ejecutar el verificador con
+`--verify-only --nas-side --smb-direct`, sin `--retire-verified-local`.
 El límite total de la unidad sigue siendo ocho horas: su ejecución programada
 a las 08:00 de Mazatlán deja margen antes del respaldo de las 19:00 (02:00 UTC).
 Antes de un arranque manual, comprobar ese margen; la restauración remota y los

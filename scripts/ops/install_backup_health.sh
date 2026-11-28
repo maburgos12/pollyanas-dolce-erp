@@ -36,4 +36,4 @@ chmod 700 "$rotator.next"
 mv "$rotator.next" "$rotator"
 systemctl daemon-reload
 # Enable the timer only after the first successful service run has been inspected.
-echo 'Installed; activate the backed-up restricted NAS service key before running vps_backup_health.py --verify-only. Inspect health-latest.json before enabling the timer. Verification never requests cleanup; the existing cron rotator remains separate.'
+echo 'Installed; verify the restricted NAS service key and encrypted SMB runtime using --verify-only --nas-side --smb-direct before enabling the timer. The scheduled service retires older verified VPS copies only, never NAS copies or Docker data.'
