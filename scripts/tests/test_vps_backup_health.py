@@ -258,6 +258,61 @@ class RestoreGatesTests(unittest.TestCase):
             with lock_path.open() as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
+    def test_local_retention_requires_full_verification_and_leaves_newest(self):
+        for fault in (None, 'verification', 'retirement'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / '.backup.flock').touch()
+                points = [f'backup_202611{day}_020001' for day in (25, 26, 27)]
+                for stem in reversed(points):
+                    (root / (stem + '.manifest')).touch()
+                private = root / 'verification-receipts'
+                canonical = root / 'receipts'
+                verified = [{'point': stem, 'manifest_sha256': 'a' * 64} for stem in points]
+
+                def read_receipt(path, stem):
+                    checksum = 'b' * 64 if path.parent == private and stem == points[1] else 'a' * 64
+                    return {'manifest_sha256': checksum}
+
+                def retire(*args, **kwargs):
+                    self.assertEqual(verify.call_count, len(points))
+                    with (root / '.backup.flock').open() as lock:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    if fault == 'retirement' and args[-1] == points[1]:
+                        raise ValueError('SMB changed')
+
+                rotator = types.SimpleNamespace(
+                    BACKUPS=root, EXPORT=root / 'export', RECEIPTS=canonical, NAS=root / 'nas',
+                    POINT=re.compile(r'backup_\d{8}_\d{6}'), require=nas.require,
+                    read_receipt=read_receipt, retire_point=Mock(side_effect=retire))
+                results = list(verified)
+                if fault == 'verification':
+                    results[-1] = ValueError('NAS unavailable')
+                with patch.object(health, 'STATE', root), patch.object(health, 'run', return_value='') as run, patch.object(health, 'verify_point', side_effect=results) as verify:
+                    if fault == 'verification':
+                        with self.assertRaisesRegex(ValueError, 'NAS unavailable'):
+                            health.maintain(rotator, True, nas_side=True, smb_direct=True, retire_verified_local=True)
+                        rotator.retire_point.assert_not_called()
+                        continue
+                    result = health.maintain(rotator, True, nas_side=True, smb_direct=True, retire_verified_local=True)
+                    run.assert_called_once()
+                    self.assertEqual(result['verified'], verified)
+                    self.assertEqual(result['retained'], points[-1])
+                    self.assertEqual(result['retired_local'], points[:1] if fault else points[:2])
+                    self.assertEqual([call.args[2:5] for call in rotator.retire_point.call_args_list],
+                                     [(private, rotator.NAS, points[0]), (canonical, rotator.NAS, points[1])])
+                    self.assertTrue(all(call.kwargs == {'nas_side': True, 'smb_direct': True}
+                                        for call in rotator.retire_point.call_args_list))
+                    if fault:
+                        self.assertIn('SMB changed', result['error'])
+                    else:
+                        self.assertNotIn('error', result)
+
+    def test_local_retention_rejects_missing_direct_smb(self):
+        with self.assertRaisesRegex(ValueError, 'Direct SMB'):
+            health.maintain(types.SimpleNamespace(require=nas.require),
+                            verify_only=True, nas_side=True, retire_verified_local=True)
+
     def test_backup_completed_between_verification_and_rotation_is_retained(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
