@@ -4,7 +4,9 @@ from decimal import Decimal
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_safe
 from rest_framework import serializers
 
 from core.audit import log_event
@@ -25,6 +27,17 @@ def mi_equipo(request):
     if not empleados_equipo(request.user).exists():
         raise PermissionDenied("No tienes colaboradores directos activos.")
     return render(request, "rrhh/mi_equipo.html", {"tipos_permiso": PermisoSalida.TIPO_CHOICES})
+
+
+@login_required
+@never_cache
+@require_safe
+def permiso_equipo_imprimir(request, pk):
+    permiso = get_object_or_404(
+        PermisoSalida.objects.select_related("empleado__jefe_directo", "empleado__sucursal_ref"),
+        pk=pk, empleado__in=empleados_equipo(request.user),
+    )
+    return render(request, "rrhh/permiso_equipo_imprimir.html", {"permiso": permiso})
 
 
 def validar_texto(request, campo):

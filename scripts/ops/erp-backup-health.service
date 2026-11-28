@@ -1,5 +1,5 @@
 [Unit]
-Description=ERP NAS restore verification without cleanup
+Description=ERP NAS restore verification and verified local backup retention
 Wants=network-online.target
 After=network-online.target docker.service
 
@@ -7,7 +7,7 @@ After=network-online.target docker.service
 Type=oneshot
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/pastelerias-erp/scripts/vps_backup_health.py --verify-only
+ExecStart=/opt/erp-backup-smb-direct/bin/python3 -B /opt/pastelerias-erp/scripts/vps_backup_health.py --verify-only --nas-side --smb-direct --retire-verified-local
 TimeoutStartSec=8h
 Nice=10
 IOSchedulingClass=idle
